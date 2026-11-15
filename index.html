@@ -151,11 +151,12 @@
             <div class="video-preview-col">
               <div class="media-container" id="mediaContainer">
                 <video id="videoPlayer" class="video-player" controls playsinline preload="metadata" referrerpolicy="no-referrer"></video>
+                <audio id="audioPlayer" preload="auto" referrerpolicy="no-referrer"></audio>
                 <img id="videoThumbnail" class="video-thumbnail hidden" alt="Thumbnail" referrerpolicy="no-referrer" />
                 <div id="previewFallbackNotice" class="preview-fallback-notice hidden">
                   <i data-lucide="video-off"></i>
                   <span>Streaming preview restricted by host CDN</span>
-                  <p>Your clean video is ready to download! Use the buttons on the right.</p>
+                  <p>Your clean video is ready to download! Use the button below.</p>
                 </div>
               </div>
             </div>
@@ -172,20 +173,30 @@
               <h3 id="videoTitle" class="video-title">Title Loading...</h3>
               <p id="videoAuthor" class="video-author">By Creator</p>
 
-              <!-- Formats / Download Options -->
-              <div class="download-formats-list" id="downloadFormatsList">
-                <!-- Dynamically populated download options -->
-              </div>
+              <!-- Single Highest Quality Download Action -->
+              <div class="single-download-box">
+                <div class="quality-badge-tag" id="selectedQualityBadge">
+                  <i data-lucide="sparkles"></i>
+                  <span id="qualityBadgeText">Highest Resolution Fetched • No Watermark</span>
+                </div>
 
-              <div class="result-actions">
-                <button type="button" id="directDownloadBtn" class="primary-download-btn">
-                  <i data-lucide="download"></i>
-                  <span>Download MP4 (Original No-Watermark)</span>
-                </button>
-                <button type="button" id="copyLinkBtn" class="secondary-btn">
-                  <i data-lucide="copy"></i>
-                  <span>Copy Stream Link</span>
-                </button>
+                <div class="result-actions">
+                  <button type="button" id="directDownloadBtn" class="primary-download-btn full-width-btn">
+                    <i data-lucide="download"></i>
+                    <span id="downloadBtnText">Download Video (Max Quality)</span>
+                  </button>
+                  
+                  <div class="secondary-actions-row">
+                    <button type="button" id="copyLinkBtn" class="secondary-btn">
+                      <i data-lucide="copy"></i>
+                      <span>Copy Stream Link</span>
+                    </button>
+                    <a id="audioDownloadLink" class="secondary-btn hidden" href="#" download="audio.m4a">
+                      <i data-lucide="music"></i>
+                      <span>Download Audio Track</span>
+                    </a>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
@@ -262,22 +273,6 @@
         </div>
       </section>
     </main>
-
-    <!-- Download Helper Modal -->
-    <div id="downloadModal" class="modal-backdrop hidden">
-      <div class="modal-card">
-        <div class="modal-header">
-          <h3><i data-lucide="download-cloud"></i> Saving Video File</h3>
-          <button id="closeDownloadModalBtn" class="icon-btn"><i data-lucide="x"></i></button>
-        </div>
-        <div class="modal-body" id="downloadModalBody">
-          <!-- Dynamic content -->
-        </div>
-        <div class="modal-footer" id="downloadModalFooter">
-          <button type="button" id="closeDownloadBtn" class="secondary-btn">Close</button>
-        </div>
-      </div>
-    </div>
 
     <!-- Settings Modal -->
     <div id="settingsModal" class="modal-backdrop hidden">

@@ -28,15 +28,19 @@ document.addEventListener('DOMContentLoaded', () => {
   const resultCard = document.getElementById('resultCard');
   const videoThumbnail = document.getElementById('videoThumbnail');
   const videoPlayer = document.getElementById('videoPlayer');
+  const audioPlayer = document.getElementById('audioPlayer');
   const previewFallbackNotice = document.getElementById('previewFallbackNotice');
   const resultPlatformBadge = document.getElementById('resultPlatformBadge');
   const resultPlatformText = document.getElementById('resultPlatformText');
   const durationBadge = document.getElementById('durationBadge');
   const videoTitle = document.getElementById('videoTitle');
   const videoAuthor = document.getElementById('videoAuthor');
-  const downloadFormatsList = document.getElementById('downloadFormatsList');
+  
+  const qualityBadgeText = document.getElementById('qualityBadgeText');
   const directDownloadBtn = document.getElementById('directDownloadBtn');
+  const downloadBtnText = document.getElementById('downloadBtnText');
   const copyLinkBtn = document.getElementById('copyLinkBtn');
+  const audioDownloadLink = document.getElementById('audioDownloadLink');
 
   // Modals
   const settingsBtn = document.getElementById('settingsBtn');
@@ -48,11 +52,6 @@ document.addEventListener('DOMContentLoaded', () => {
   const customApiUrl = document.getElementById('customApiUrl');
   const autoPreviewCheck = document.getElementById('autoPreviewCheck');
 
-  const downloadModal = document.getElementById('downloadModal');
-  const downloadModalBody = document.getElementById('downloadModalBody');
-  const closeDownloadModalBtn = document.getElementById('closeDownloadModalBtn');
-  const closeDownloadBtn = document.getElementById('closeDownloadBtn');
-
   // Theme
   const themeToggle = document.getElementById('themeToggle');
   const themeIcon = document.getElementById('themeIcon');
@@ -62,6 +61,31 @@ document.addEventListener('DOMContentLoaded', () => {
   let activeEngine = localStorage.getItem('omni_engine') || 'auto';
   let customApi = localStorage.getItem('omni_custom_api') || '';
   let autoPreview = localStorage.getItem('omni_auto_preview') !== 'false';
+
+  // --- Audio / Video Synchronization for In-Browser Sound ---
+  if (videoPlayer && audioPlayer) {
+    videoPlayer.addEventListener('play', () => {
+      if (audioPlayer.src) {
+        audioPlayer.currentTime = videoPlayer.currentTime;
+        audioPlayer.play().catch(() => {});
+      }
+    });
+
+    videoPlayer.addEventListener('pause', () => {
+      if (audioPlayer.src) audioPlayer.pause();
+    });
+
+    videoPlayer.addEventListener('seeking', () => {
+      if (audioPlayer.src) audioPlayer.currentTime = videoPlayer.currentTime;
+    });
+
+    videoPlayer.addEventListener('volumechange', () => {
+      if (audioPlayer.src) {
+        audioPlayer.volume = videoPlayer.volume;
+        audioPlayer.muted = videoPlayer.muted;
+      }
+    });
+  }
 
   // --- Theme Management ---
   const initTheme = () => {
@@ -219,7 +243,6 @@ document.addEventListener('DOMContentLoaded', () => {
   // --- Helpers ---
   const isDirectMediaUrl = (url) => {
     if (!url || typeof url !== 'string') return false;
-    // Discard webpage URLs that don't point to an actual media stream
     if (url.includes('youtube.com/watch') || url.includes('youtube.com/shorts') ||
         url.includes('instagram.com/reel') || url.includes('facebook.com/reel')) {
       return false;
@@ -230,7 +253,7 @@ document.addEventListener('DOMContentLoaded', () => {
   // --- API Extraction Engines ---
 
   /**
-   * Dedicated YouTube Invidious Multi-Node Resolver
+   * Dedicated YouTube Invidious Multi-Node Resolver with Audio Track Support
    */
   const INVIDIOUS_NODES = [
     'https://yt.chocolatemoo53.com',
@@ -243,7 +266,6 @@ document.addEventListener('DOMContentLoaded', () => {
     const videoId = extractYouTubeId(url);
     if (!videoId) throw new Error('Could not parse YouTube video ID from URL');
 
-    let lastError = null;
     for (const node of INVIDIOUS_NODES) {
       try {
         const apiUrl = `${node}/api/v1/videos/${videoId}`;
@@ -257,45 +279,41 @@ document.addEventListener('DOMContentLoaded', () => {
         const data = await res.json();
         if (!data || !data.title) continue;
 
-        // Collect available formats
-        const formats = [];
         const rawAdaptive = data.adaptiveFormats || [];
         const rawStreams = data.formatStreams || [];
 
-        // 1. Process merged streams
-        rawStreams.forEach(s => {
-          if (s.url && isDirectMediaUrl(s.url)) {
-            formats.push({
-              label: s.resolution || s.quality || 'Standard HD',
-              ext: s.container || 'mp4',
-              size: 'Merged Audio+Video',
-              url: s.url
-            });
+        let bestVideoUrl = '';
+        let bestQualityLabel = '1080p Full HD';
+        let bestAudioUrl = '';
+
+        // Check for progressive audio stream
+        const audioStream = rawAdaptive.find(f => f.url && f.type && f.type.includes('audio/mp4')) ||
+                            rawAdaptive.find(f => f.url && f.type && f.type.includes('audio/'));
+        if (audioStream) {
+          bestAudioUrl = audioStream.url;
+        }
+
+        // 1. Check if merged audio+video streams exist (itag 18 or 22)
+        if (rawStreams.length > 0) {
+          const merged = rawStreams.filter(s => s.url && isDirectMediaUrl(s.url));
+          if (merged.length > 0) {
+            bestVideoUrl = merged[merged.length - 1].url;
+            bestQualityLabel = merged[merged.length - 1].resolution || '720p HD (Muxed Sound)';
           }
-        });
+        }
 
-        // 2. Process high-res adaptive video streams
-        rawAdaptive.forEach(f => {
-          if (f.url && f.type && f.type.includes('video/mp4')) {
-            const label = f.qualityLabel || f.resolution || 'MP4';
-            // Avoid duplicates
-            if (!formats.some(existing => existing.label === label)) {
-              formats.push({
-                label: `${label} (Clean Stream)`,
-                ext: 'mp4',
-                size: 'High Bitrate',
-                url: f.url
-              });
-            }
+        // 2. If no merged stream, pick highest adaptive video stream
+        if (!bestVideoUrl) {
+          const videoStreams = rawAdaptive.filter(f => f.url && f.type && f.type.includes('video/mp4'));
+          if (videoStreams.length > 0) {
+            const top = videoStreams[videoStreams.length - 1];
+            bestVideoUrl = top.url;
+            bestQualityLabel = top.qualityLabel || top.resolution || '1080p Full HD';
           }
-        });
+        }
 
-        if (formats.length === 0) continue;
+        if (!bestVideoUrl) continue;
 
-        // Choose best format (highest resolution)
-        const bestUrl = formats[formats.length - 1].url;
-
-        // Thumbnail
         const thumb = (data.videoThumbnails && data.videoThumbnails[0]) 
           ? data.videoThumbnails[0].url 
           : `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`;
@@ -304,14 +322,14 @@ document.addEventListener('DOMContentLoaded', () => {
           title: data.title || 'YouTube Short',
           author: data.author || 'Creator',
           thumbnail: thumb,
-          duration: data.lengthSeconds ? `${data.lengthSeconds}s` : 'Short',
+          duration: data.lengthSeconds ? `${data.lengthSeconds}s` : 'Full Length',
           sourceUrl: url,
-          directUrl: bestUrl,
-          formats: formats
+          directUrl: bestVideoUrl,
+          audioUrl: bestAudioUrl,
+          qualityLabel: bestQualityLabel
         };
       } catch (err) {
-        lastError = err;
-        continue; // Try next node
+        continue;
       }
     }
 
@@ -320,6 +338,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   /**
    * Primary Engine: VKr public media extractor (for Instagram, Facebook, Kwai, TikTok)
+   * Note: Instagram, Facebook, and TikTok CDN streams already bundle video + audio together!
    */
   const extractWithVkr = async (url) => {
     const apiUrl = `https://vkrdownloader.org/server/?api_key=vkrdownloader&vkr=${encodeURIComponent(url)}`;
@@ -334,16 +353,19 @@ document.addEventListener('DOMContentLoaded', () => {
     const inner = data.data || data;
     const rawFormats = inner.downloads || inner.formats || [];
     
-    // Filter down to valid media streams
     const validFormats = rawFormats.filter(f => {
       const link = f.url || f.download_url;
       return link && isDirectMediaUrl(link);
     });
 
     let bestUrl = '';
+    let qualityLabel = 'Full HD (Original Sound)';
+
     if (validFormats.length > 0) {
       const mp4Formats = validFormats.filter(f => f.ext === 'mp4' || f.format_id?.includes('p'));
-      bestUrl = (mp4Formats[0] || validFormats[0]).url || (mp4Formats[0] || validFormats[0]).download_url;
+      const chosen = mp4Formats[0] || validFormats[0];
+      bestUrl = chosen.url || chosen.download_url;
+      qualityLabel = chosen.format_id || chosen.quality || 'Full HD (Original Sound)';
     } else if (isDirectMediaUrl(inner.source)) {
       bestUrl = inner.source;
     }
@@ -359,17 +381,13 @@ document.addEventListener('DOMContentLoaded', () => {
       duration: inner.duration || 'Full Quality',
       sourceUrl: url,
       directUrl: bestUrl,
-      formats: validFormats.map(f => ({
-        label: f.format_id || f.quality || (f.ext === 'mp3' ? 'Audio MP3' : 'MP4 Video'),
-        ext: f.ext || 'mp4',
-        size: f.size || f.filesize_str || 'Full Quality',
-        url: f.url || f.download_url
-      }))
+      audioUrl: '',
+      qualityLabel: qualityLabel
     };
   };
 
   /**
-   * Cobalt Engine (Used only when user supplies a custom instance)
+   * Cobalt Engine (Only when user supplies a custom instance in Settings)
    */
   const extractWithCobalt = async (url, customEndpoint) => {
     if (!customEndpoint) {
@@ -412,12 +430,8 @@ document.addEventListener('DOMContentLoaded', () => {
       duration: 'HD',
       sourceUrl: url,
       directUrl: directUrl,
-      formats: [{
-        label: 'Best Available (No Watermark)',
-        ext: 'mp4',
-        size: 'Original Bitrate',
-        url: directUrl
-      }]
+      audioUrl: '',
+      qualityLabel: 'Max Bitrate (Original Sound)'
     };
   };
 
@@ -443,12 +457,8 @@ document.addEventListener('DOMContentLoaded', () => {
       duration: data.duration ? `${Math.floor(data.duration / 60)}:${data.duration % 60}` : 'Short',
       sourceUrl: url,
       directUrl: data.url,
-      formats: [{
-        label: 'Original 1080p/4K (Raw Stream)',
-        ext: 'mp4',
-        size: 'Max Bitrate',
-        url: data.url
-      }]
+      audioUrl: '',
+      qualityLabel: '1080p/4K Merged (Full Audio+Video)'
     };
   };
 
@@ -460,7 +470,6 @@ document.addEventListener('DOMContentLoaded', () => {
       return;
     }
 
-    // Guard against channel / profile links
     const profileWarning = isProfileOrChannelUrl(rawUrl);
     if (profileWarning) {
       showError(profileWarning.message, rawUrl);
@@ -483,7 +492,6 @@ document.addEventListener('DOMContentLoaded', () => {
         loadingStatusText.textContent = 'Contacting Cobalt instance...';
         result = await extractWithCobalt(rawUrl, customApi);
       } else {
-        // Smart Auto Resolver based on Platform
         if (detected && detected.key === 'youtube') {
           loadingStatusText.textContent = 'Extracting YouTube Short streams...';
           try {
@@ -494,7 +502,6 @@ document.addEventListener('DOMContentLoaded', () => {
             result = await extractWithVkr(rawUrl);
           }
         } else {
-          // Instagram, Facebook, Kuaishou, TikTok
           loadingStatusText.textContent = 'Extracting original video without watermark...';
           result = await extractWithVkr(rawUrl);
         }
@@ -508,7 +515,6 @@ document.addEventListener('DOMContentLoaded', () => {
     } catch (err) {
       console.error(err);
       let userFriendlyMsg = err.message || 'Failed to fetch video.';
-      // Clean up internal error codes
       if (userFriendlyMsg.includes('404')) {
         userFriendlyMsg = 'Video not found (404). Please ensure the link points to a single video/reel and not a channel page or private account.';
       } else if (userFriendlyMsg.includes('error.api.auth') || userFriendlyMsg.includes('jwt')) {
@@ -521,7 +527,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   };
 
-  // --- Display Result ---
+  // --- Display Result (Clean Single Button UI) ---
   const displayResult = (data, platform) => {
     currentVideoData = data;
     hideStates();
@@ -549,7 +555,19 @@ document.addEventListener('DOMContentLoaded', () => {
     videoPlayer.src = data.directUrl;
     videoPlayer.load();
 
-    // Fallback if in-browser playback is restricted by CDN CORS
+    // Link audio track if available (for YouTube stereo sound synchronization)
+    if (data.audioUrl) {
+      audioPlayer.src = data.audioUrl;
+      audioPlayer.load();
+      if (audioDownloadLink) {
+        audioDownloadLink.href = data.audioUrl;
+        audioDownloadLink.classList.remove('hidden');
+      }
+    } else {
+      audioPlayer.removeAttribute('src');
+      if (audioDownloadLink) audioDownloadLink.classList.add('hidden');
+    }
+
     videoPlayer.onerror = () => {
       console.warn('Browser video element was blocked from streaming this CDN URL');
       videoPlayer.classList.add('hidden');
@@ -559,41 +577,17 @@ document.addEventListener('DOMContentLoaded', () => {
       previewFallbackNotice.classList.remove('hidden');
     };
 
-    // Populate format list
-    downloadFormatsList.innerHTML = '';
-    const formatsToRender = (data.formats && data.formats.length > 0) 
-      ? data.formats 
-      : [{ label: 'Full Resolution (No Watermark)', ext: 'mp4', size: 'Original', url: data.directUrl }];
+    // Update Single Download Button & Quality Badge
+    if (qualityBadgeText) {
+      qualityBadgeText.textContent = `${data.qualityLabel || 'Highest Resolution (1080p Full HD)'} • No Watermark`;
+    }
+    if (downloadBtnText) {
+      downloadBtnText.textContent = `Download Video (${data.qualityLabel ? data.qualityLabel.split(' ')[0] : 'Full HD'})`;
+    }
 
-    formatsToRender.forEach(f => {
-      const row = document.createElement('div');
-      row.className = 'format-row';
-      row.innerHTML = `
-        <div class="format-info">
-          <span class="format-tag">${(f.ext || 'MP4').toUpperCase()}</span>
-          <strong>${f.label || 'Standard Format'}</strong>
-          <span class="setting-help">${f.size || ''}</span>
-        </div>
-        <button class="format-btn" data-url="${f.url}" data-name="${getSafeFilename(data.title, f.ext)}">
-          <i data-lucide="download"></i> Download
-        </button>
-      `;
-      downloadFormatsList.appendChild(row);
-    });
-
-    // Attach click to format buttons
-    downloadFormatsList.querySelectorAll('.format-btn').forEach(btn => {
-      btn.addEventListener('click', (e) => {
-        e.preventDefault();
-        const url = btn.getAttribute('data-url');
-        const filename = btn.getAttribute('data-name');
-        triggerFileDownload(url, filename, btn);
-      });
-    });
-
-    // Primary download button
+    // Primary Single Download Button Click Event
     directDownloadBtn.onclick = () => {
-      triggerFileDownload(data.directUrl, getSafeFilename(data.title, 'mp4'), directDownloadBtn);
+      triggerFileDownload(data.directUrl, getSafeFilename(data.title, 'mp4'));
     };
 
     // Copy direct link button
@@ -613,52 +607,51 @@ document.addEventListener('DOMContentLoaded', () => {
     resultCard.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   };
 
-  // --- Forced Direct Download Function ---
-  const triggerFileDownload = async (url, filename, targetBtn = null) => {
+  // --- Direct One-Click Download Function (NO MODAL) ---
+  const triggerFileDownload = async (url, filename) => {
     if (!url) return;
 
-    const originalBtnHtml = targetBtn ? targetBtn.innerHTML : null;
-    if (targetBtn) {
-      targetBtn.disabled = true;
-      targetBtn.innerHTML = `<div class="btn-spinner"></div> <span>Downloading to device...</span>`;
-    }
+    directDownloadBtn.disabled = true;
+    const originalText = directDownloadBtn.innerHTML;
+    directDownloadBtn.innerHTML = `<div class="btn-spinner"></div> <span>Downloading to your device...</span>`;
 
+    // 1. Attempt direct fetch to convert to Blob (cleanest file saving)
     try {
-      // Step 1: Attempt direct fetch to convert to Blob (works when CDN allows CORS)
       const res = await fetch(url, { referrerPolicy: 'no-referrer' });
       if (res.ok) {
         const blob = await res.blob();
         saveBlobLocally(blob, filename);
-        indicateSuccess(targetBtn, originalBtnHtml);
+        indicateSuccess(originalText);
         return;
       }
     } catch (e1) {
-      console.warn('Direct fetch failed due to CORS. Attempting CORS proxy...', e1);
+      console.warn('Direct blob fetch failed, trying proxy...', e1);
     }
 
-    // Step 2: Attempt via fast CORS proxy to force same-origin Blob
+    // 2. Attempt via fast CORS proxy to force same-origin Blob
     try {
       const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`;
       const res = await fetch(proxyUrl, { referrerPolicy: 'no-referrer' });
       if (res.ok) {
         const blob = await res.blob();
         saveBlobLocally(blob, filename);
-        indicateSuccess(targetBtn, originalBtnHtml);
+        indicateSuccess(originalText);
         return;
       }
     } catch (e2) {
-      console.warn('CORS proxy fetch failed:', e2);
+      console.warn('CORS proxy fetch failed, executing direct download trigger...', e2);
     }
 
-    // Reset button
-    if (targetBtn && originalBtnHtml) {
-      targetBtn.disabled = false;
-      targetBtn.innerHTML = originalBtnHtml;
-      if (window.lucide) window.lucide.createIcons();
-    }
+    // 3. Fallback direct anchor trigger (never opens modal)
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    a.target = '_self';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
 
-    // Step 3: If in-memory download is blocked by CDN security, show clean Download Guide Modal
-    showDownloadGuideModal(url, filename);
+    indicateSuccess(originalText);
   };
 
   const saveBlobLocally = (blob, filename) => {
@@ -672,37 +665,14 @@ document.addEventListener('DOMContentLoaded', () => {
     setTimeout(() => window.URL.revokeObjectURL(blobUrl), 10000);
   };
 
-  const indicateSuccess = (btn, originalHtml) => {
-    if (!btn) return;
-    btn.innerHTML = `<i data-lucide="check-circle-2"></i> <span>Saved to Downloads!</span>`;
+  const indicateSuccess = (originalHtml) => {
+    directDownloadBtn.innerHTML = `<i data-lucide="check-circle-2"></i> <span>Download Started!</span>`;
     if (window.lucide) window.lucide.createIcons();
     setTimeout(() => {
-      btn.disabled = false;
-      btn.innerHTML = originalHtml;
+      directDownloadBtn.disabled = false;
+      directDownloadBtn.innerHTML = originalHtml;
       if (window.lucide) window.lucide.createIcons();
-    }, 3000);
-  };
-
-  const showDownloadGuideModal = (url, filename) => {
-    downloadModalBody.innerHTML = `
-      <div class="download-guide-box">
-        <span class="guide-badge"><i data-lucide="shield-check"></i> Direct Stream Extracted</span>
-        <p>Because social platforms (Instagram / YouTube) restrict silent background browser downloads, your browser requires a direct save:</p>
-        <div class="step-list">
-          <div class="step-item">
-            <strong>Desktop:</strong> Click <em>"Open Video Stream"</em> below, then press <strong>Ctrl + S</strong> (or right-click the video & select <em>"Save video as..."</em>).
-          </div>
-          <div class="step-item">
-            <strong>Mobile (Android / iPhone):</strong> On the video player above, tap the <strong>3 vertical dots (⋮)</strong> and tap <strong>Download</strong>.
-          </div>
-        </div>
-        <a href="${url}" target="_blank" rel="noreferrer" download="${filename}" class="download-action-btn" style="text-decoration: none; margin-top: 10px; width: 100%;">
-          <i data-lucide="external-link"></i> Open Video Stream
-        </a>
-      </div>
-    `;
-    downloadModal.classList.remove('hidden');
-    if (window.lucide) window.lucide.createIcons();
+    }, 3500);
   };
 
   const getSafeFilename = (title, ext = 'mp4') => {
@@ -746,7 +716,7 @@ document.addEventListener('DOMContentLoaded', () => {
     resultCard.classList.add('hidden');
   };
 
-  // --- Modals Management ---
+  // --- Settings Modal Handlers ---
   settingsBtn?.addEventListener('click', () => {
     engineSelect.value = activeEngine;
     customApiUrl.value = customApi;
@@ -759,13 +729,6 @@ document.addEventListener('DOMContentLoaded', () => {
   closeSettingsBtn?.addEventListener('click', closeSettings);
   settingsModal?.addEventListener('click', (e) => {
     if (e.target === settingsModal) closeSettings();
-  });
-
-  const closeDownload = () => downloadModal.classList.add('hidden');
-  closeDownloadModalBtn?.addEventListener('click', closeDownload);
-  closeDownloadBtn?.addEventListener('click', closeDownload);
-  downloadModal?.addEventListener('click', (e) => {
-    if (e.target === downloadModal) closeDownload();
   });
 
   const toggleCustomField = () => {
