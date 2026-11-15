@@ -603,52 +603,82 @@ document.addEventListener('DOMContentLoaded', () => {
 
     hideStates();
     loadingState.classList.remove('hidden');
-    loadingStatusText.textContent = 'Resolving media stream... (Step 1/2)';
     downloadBtn.disabled = true;
 
     const detected = detectPlatform(cleanUrl);
     let result = null;
+    const MAX_RETRIES = 3;
+    let attempt = 0;
+    let lastError = null;
 
     try {
-      if (activeEngine === 'custom') {
-        loadingStatusText.textContent = 'Connecting to custom engine...';
-        result = await extractWithCustom(cleanUrl, customApi);
-      } else {
-        if (detected?.key === 'kuaishou') {
-          loadingStatusText.textContent = 'Extracting Kuaishou / Kwai original video...';
-          result = await extractKuaishou(cleanUrl);
-        } else if (detected?.key === 'instagram') {
-          loadingStatusText.textContent = 'Extracting Instagram Reel full quality stream...';
-          result = await extractInstagram(cleanUrl);
-        } else if (detected?.key === 'facebook') {
-          loadingStatusText.textContent = 'Extracting Facebook Reel video & audio...';
-          result = await extractFacebook(cleanUrl);
-        } else if (detected?.key === 'youtube') {
-          loadingStatusText.textContent = 'Extracting YouTube Short streams...';
-          result = await extractYouTubeInvidious(cleanUrl);
-        } else if (detected?.key === 'tiktok') {
-          loadingStatusText.textContent = 'Extracting TikTok video without watermark...';
-          result = await extractTikTok(cleanUrl);
-        } else {
-          // Auto detect attempt across engines
-          try {
-            result = await extractInstagram(cleanUrl);
-          } catch (e1) {
-            try {
+      while (attempt < MAX_RETRIES) {
+        attempt++;
+        const attemptLabel = `(Attempt ${attempt}/${MAX_RETRIES})`;
+
+        try {
+          if (activeEngine === 'custom') {
+            loadingStatusText.textContent = `Connecting to custom engine... ${attemptLabel}`;
+            result = await extractWithCustom(cleanUrl, customApi);
+          } else {
+            if (detected?.key === 'kuaishou') {
+              loadingStatusText.textContent = `Extracting Kuaishou / Kwai video... ${attemptLabel}`;
               result = await extractKuaishou(cleanUrl);
-            } catch (e2) {
+            } else if (detected?.key === 'instagram') {
+              loadingStatusText.textContent = `Extracting Instagram Reel full quality stream... ${attemptLabel}`;
+              result = await extractInstagram(cleanUrl);
+            } else if (detected?.key === 'facebook') {
+              loadingStatusText.textContent = `Extracting Facebook Reel video & audio... ${attemptLabel}`;
+              result = await extractFacebook(cleanUrl);
+            } else if (detected?.key === 'youtube') {
+              loadingStatusText.textContent = `Extracting YouTube Short streams... ${attemptLabel}`;
               result = await extractYouTubeInvidious(cleanUrl);
+            } else if (detected?.key === 'tiktok') {
+              loadingStatusText.textContent = `Extracting TikTok video without watermark... ${attemptLabel}`;
+              result = await extractTikTok(cleanUrl);
+            } else {
+              // Auto detect attempt across engines
+              loadingStatusText.textContent = `Auto-resolving platform media stream... ${attemptLabel}`;
+              try {
+                result = await extractFacebook(cleanUrl);
+              } catch (e1) {
+                try {
+                  result = await extractKuaishou(cleanUrl);
+                } catch (e2) {
+                  try {
+                    result = await extractInstagram(cleanUrl);
+                  } catch (e3) {
+                    result = await extractYouTubeInvidious(cleanUrl);
+                  }
+                }
+              }
             }
+          }
+
+          if (result && result.directUrl) {
+            // Successfully extracted media stream! Break retry loop
+            break;
+          } else {
+            throw new Error('No downloadable stream found in response.');
+          }
+        } catch (attemptErr) {
+          lastError = attemptErr;
+          console.warn(`Extraction attempt ${attempt}/${MAX_RETRIES} failed:`, attemptErr.message);
+
+          if (attempt < MAX_RETRIES) {
+            const delaySec = attempt; // 1s then 2s
+            loadingStatusText.textContent = `Server busy or connection lag. Auto-retrying in ${delaySec}s... (Attempt ${attempt + 1}/${MAX_RETRIES})`;
+            await new Promise(res => setTimeout(res, delaySec * 1000));
           }
         }
       }
 
       if (!result || !result.directUrl) {
-        throw new Error('Could not find a downloadable video stream for this link.');
+        throw lastError || new Error('Could not find a downloadable video stream for this link after 3 attempts.');
       }
 
       // Pre-buffering Step: Pre-fetch video blob into memory for instant 0-second saving!
-      loadingStatusText.textContent = 'Pre-buffering video file for instant 0s download... (Step 2/2)';
+      loadingStatusText.textContent = 'Pre-buffering video file for instant 0s download...';
       
       try {
         const ctrl = new AbortController();
@@ -831,6 +861,16 @@ document.addEventListener('DOMContentLoaded', () => {
     errorMessage.textContent = msg;
 
     errorActions.innerHTML = '';
+    
+    // Add 1-click Retry button
+    const retryBtn = document.createElement('button');
+    retryBtn.type = 'button';
+    retryBtn.className = 'inline-btn';
+    retryBtn.style.marginRight = '8px';
+    retryBtn.innerHTML = `<i data-lucide="refresh-cw"></i> Retry (3 Attempts)`;
+    retryBtn.onclick = () => fetchVideo();
+    errorActions.appendChild(retryBtn);
+
     if (url) {
       const openDirectBtn = document.createElement('a');
       openDirectBtn.className = 'inline-btn';
