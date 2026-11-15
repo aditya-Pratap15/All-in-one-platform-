@@ -137,29 +137,34 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // --- Platform Detection Patterns ---
   const PLATFORMS = {
-    kuaishou: {
-      name: 'Kuaishou / Kwai',
-      icon: 'video',
-      pattern: /(?:kuaishou\.com|kwai\.com|kwai-video\.com|v\.kuaishou\.com)/i
+    youtube: {
+      name: 'YouTube Shorts',
+      icon: 'play-circle',
+      iconImg: 'assets/icons/youtube.png',
+      pattern: /(?:youtube\.com\/(?:shorts\/[a-zA-Z0-9_-]{11}|watch\?v=[a-zA-Z0-9_-]{11})|youtu\.be\/[a-zA-Z0-9_-]{11})/i
     },
     instagram: {
       name: 'Instagram Reels',
       icon: 'instagram',
+      iconImg: 'assets/icons/instagram.webp',
       pattern: /instagram\.com\/(?:reel|p|tv)\//i
-    },
-    youtube: {
-      name: 'YouTube Shorts',
-      icon: 'play-circle',
-      pattern: /(?:youtube\.com\/(?:shorts\/[a-zA-Z0-9_-]{11}|watch\?v=[a-zA-Z0-9_-]{11})|youtu\.be\/[a-zA-Z0-9_-]{11})/i
     },
     facebook: {
       name: 'Facebook Reels',
       icon: 'facebook',
+      iconImg: 'assets/icons/facebook.png',
       pattern: /(?:facebook\.com\/(?:reel|watch|share|.*\/videos\/)|fb\.watch\/)/i
+    },
+    kuaishou: {
+      name: 'Kuaishou / Kwai',
+      icon: 'video',
+      iconImg: 'assets/icons/kuaishou.png',
+      pattern: /(?:kuaishou\.com|kwai\.com|kwai-video\.com|v\.kuaishou\.com)/i
     },
     tiktok: {
       name: 'TikTok',
       icon: 'music-2',
+      iconImg: 'assets/icons/tiktok.avif',
       pattern: /(?:tiktok\.com\/.*video\/|vt\.tiktok\.com)/i
     }
   };
@@ -259,7 +264,11 @@ document.addEventListener('DOMContentLoaded', () => {
       detectionText.textContent = `Channel Profile link detected — please paste an individual video link`;
       detectionNotice.classList.remove('hidden');
     } else if (platform) {
-      detectedPlatformIcon.innerHTML = `<i data-lucide="${platform.icon}"></i>`;
+      if (platform.iconImg) {
+        detectedPlatformIcon.innerHTML = `<img src="${platform.iconImg}" class="input-platform-icon-img" alt="${platform.name}" />`;
+      } else {
+        detectedPlatformIcon.innerHTML = `<i data-lucide="${platform.icon}"></i>`;
+      }
       detectionText.textContent = `Detected: ${platform.name}`;
       detectionNotice.classList.remove('hidden');
       
@@ -837,17 +846,23 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const platformName = item.platform ? item.platform.name : 'Video';
     const platformIcon = item.platform ? item.platform.icon : 'film';
+    const thumbIconHtml = item.platform && item.platform.iconImg
+      ? `<img src="${item.platform.iconImg}" class="queue-platform-icon-img" alt="${platformName}" />`
+      : `<i data-lucide="${platformIcon}"></i>`;
+    const badgeIconHtml = item.platform && item.platform.iconImg
+      ? `<img src="${item.platform.iconImg}" class="queue-badge-icon-img" alt="${platformName}" />`
+      : `<i data-lucide="${platformIcon}" style="width:12px;height:12px;"></i>`;
 
     div.innerHTML = `
       <div class="queue-left-col">
         <div class="queue-thumb-wrapper" id="${item.id}-thumb">
-          <i data-lucide="${platformIcon}"></i>
+          ${thumbIconHtml}
         </div>
         <div class="queue-info">
           <div class="queue-title" id="${item.id}-title" title="${item.url}">${item.url}</div>
           <div class="queue-meta-row">
             <span class="queue-platform-badge">
-              <i data-lucide="${platformIcon}" style="width:12px;height:12px;"></i>
+              ${badgeIconHtml}
               <span>${platformName}</span>
             </span>
             <span class="queue-status-badge pending" id="${item.id}-status">
@@ -1145,7 +1160,15 @@ document.addEventListener('DOMContentLoaded', () => {
     videoTitle.textContent = data.title || 'Shorts / Reel Video';
     videoAuthor.textContent = `Creator: ${data.author || 'Original Author'}`;
     durationBadge.textContent = data.duration || 'Full Quality';
-    resultPlatformText.textContent = platform ? platform.name : 'Video';
+    
+    const slot = document.getElementById('resultPlatformIconSlot');
+    if (platform && platform.iconImg) {
+      if (slot) slot.innerHTML = `<img src="${platform.iconImg}" class="result-platform-icon-img" alt="${platform.name}" />`;
+      resultPlatformText.textContent = platform.name;
+    } else {
+      if (slot) slot.innerHTML = `<i data-lucide="film"></i>`;
+      resultPlatformText.textContent = platform ? platform.name : 'Video';
+    }
 
     // Player setup: use pre-buffered blob if available, otherwise direct stream
     videoPlayer.classList.remove('hidden');
