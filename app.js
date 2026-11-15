@@ -91,7 +91,7 @@ document.addEventListener('DOMContentLoaded', () => {
     youtube: {
       name: 'YouTube Shorts',
       icon: 'play-circle',
-      pattern: /(?:youtube\.com\/(?:shorts\/|watch\?v=)|youtu\.be\/)/i
+      pattern: /(?:youtube\.com\/(?:shorts\/[a-zA-Z0-9_-]{11}|watch\?v=[a-zA-Z0-9_-]{11})|youtu\.be\/[a-zA-Z0-9_-]{11})/i
     },
     instagram: {
       name: 'Instagram Reels',
@@ -111,8 +111,31 @@ document.addEventListener('DOMContentLoaded', () => {
     tiktok: {
       name: 'TikTok',
       icon: 'music-2',
-      pattern: /(?:tiktok\.com|vt\.tiktok\.com)/i
+      pattern: /(?:tiktok\.com\/.*video\/|vt\.tiktok\.com)/i
     }
+  };
+
+  const isProfileOrChannelUrl = (url) => {
+    if (!url) return null;
+    if (/(?:youtube\.com\/(?:@|channel\/|c\/|user\/))/i.test(url)) {
+      return {
+        platform: 'YouTube',
+        message: 'This is a YouTube Channel profile link. Please click on a specific Short video, tap "Share" → "Copy Link", and paste that video URL here (e.g. https://youtube.com/shorts/VIDEO_ID).'
+      };
+    }
+    if (/(?:instagram\.com\/(?!reel\/|p\/|tv\/)[a-zA-Z0-9_.-]+\/?$)/i.test(url)) {
+      return {
+        platform: 'Instagram',
+        message: 'This is an Instagram Profile link. Please open a specific Reel or video post and copy its link.'
+      };
+    }
+    if (/(?:tiktok\.com\/@[a-zA-Z0-9_.-]+\/?$)/i.test(url)) {
+      return {
+        platform: 'TikTok',
+        message: 'This is a TikTok Creator Profile link. Please open a specific video and copy its link.'
+      };
+    }
+    return null;
   };
 
   const detectPlatform = (url) => {
@@ -138,11 +161,16 @@ document.addEventListener('DOMContentLoaded', () => {
       clearBtn.classList.add('hidden');
     }
 
+    const channelNotice = isProfileOrChannelUrl(url);
     const platform = detectPlatform(url);
     const platformTags = document.querySelectorAll('.platform-tag');
     platformTags.forEach(tag => tag.classList.remove('active'));
 
-    if (platform) {
+    if (channelNotice) {
+      detectedPlatformIcon.innerHTML = `<i data-lucide="alert-triangle"></i>`;
+      detectionText.textContent = `Channel Profile link detected — please paste an individual video link`;
+      detectionNotice.classList.remove('hidden');
+    } else if (platform) {
       detectedPlatformIcon.innerHTML = `<i data-lucide="${platform.icon}"></i>`;
       detectionText.textContent = `Detected: ${platform.name}`;
       detectionNotice.classList.remove('hidden');
@@ -432,6 +460,13 @@ document.addEventListener('DOMContentLoaded', () => {
       return;
     }
 
+    // Guard against channel / profile links
+    const profileWarning = isProfileOrChannelUrl(rawUrl);
+    if (profileWarning) {
+      showError(profileWarning.message, rawUrl);
+      return;
+    }
+
     hideStates();
     loadingState.classList.remove('hidden');
     loadingStatusText.textContent = 'Resolving media stream...';
@@ -474,7 +509,9 @@ document.addEventListener('DOMContentLoaded', () => {
       console.error(err);
       let userFriendlyMsg = err.message || 'Failed to fetch video.';
       // Clean up internal error codes
-      if (userFriendlyMsg.includes('error.api.auth') || userFriendlyMsg.includes('jwt')) {
+      if (userFriendlyMsg.includes('404')) {
+        userFriendlyMsg = 'Video not found (404). Please ensure the link points to a single video/reel and not a channel page or private account.';
+      } else if (userFriendlyMsg.includes('error.api.auth') || userFriendlyMsg.includes('jwt')) {
         userFriendlyMsg = 'This public server requires authentication. Please use Auto mode or configure a custom instance in Settings.';
       }
       showError(userFriendlyMsg, rawUrl, detected);
