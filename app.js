@@ -124,6 +124,11 @@ document.addEventListener('DOMContentLoaded', () => {
     return null;
   };
 
+  const extractYouTubeId = (url) => {
+    const match = url.match(/(?:youtube\.com\/(?:shorts\/|watch\?v=)|youtu\.be\/)([a-zA-Z0-9_-]{11})/);
+    return match ? match[1] : null;
+  };
+
   // --- Input Handlers ---
   const handleUrlChange = () => {
     const url = videoUrlInput.value.trim();
@@ -197,7 +202,96 @@ document.addEventListener('DOMContentLoaded', () => {
   // --- API Extraction Engines ---
 
   /**
-   * Primary Engine: VKr public media extractor
+   * Dedicated YouTube Invidious Multi-Node Resolver
+   */
+  const INVIDIOUS_NODES = [
+    'https://yt.chocolatemoo53.com',
+    'https://inv.nadeko.net',
+    'https://invidious.nerdvpn.de',
+    'https://invidious.tiekoetter.com'
+  ];
+
+  const extractYouTubeInvidious = async (url) => {
+    const videoId = extractYouTubeId(url);
+    if (!videoId) throw new Error('Could not parse YouTube video ID from URL');
+
+    let lastError = null;
+    for (const node of INVIDIOUS_NODES) {
+      try {
+        const apiUrl = `${node}/api/v1/videos/${videoId}`;
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 6000);
+
+        const res = await fetch(apiUrl, { signal: controller.signal });
+        clearTimeout(timeout);
+
+        if (!res.ok) continue;
+        const data = await res.json();
+        if (!data || !data.title) continue;
+
+        // Collect available formats
+        const formats = [];
+        const rawAdaptive = data.adaptiveFormats || [];
+        const rawStreams = data.formatStreams || [];
+
+        // 1. Process merged streams
+        rawStreams.forEach(s => {
+          if (s.url && isDirectMediaUrl(s.url)) {
+            formats.push({
+              label: s.resolution || s.quality || 'Standard HD',
+              ext: s.container || 'mp4',
+              size: 'Merged Audio+Video',
+              url: s.url
+            });
+          }
+        });
+
+        // 2. Process high-res adaptive video streams
+        rawAdaptive.forEach(f => {
+          if (f.url && f.type && f.type.includes('video/mp4')) {
+            const label = f.qualityLabel || f.resolution || 'MP4';
+            // Avoid duplicates
+            if (!formats.some(existing => existing.label === label)) {
+              formats.push({
+                label: `${label} (Clean Stream)`,
+                ext: 'mp4',
+                size: 'High Bitrate',
+                url: f.url
+              });
+            }
+          }
+        });
+
+        if (formats.length === 0) continue;
+
+        // Choose best format (highest resolution)
+        const bestUrl = formats[formats.length - 1].url;
+
+        // Thumbnail
+        const thumb = (data.videoThumbnails && data.videoThumbnails[0]) 
+          ? data.videoThumbnails[0].url 
+          : `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`;
+
+        return {
+          title: data.title || 'YouTube Short',
+          author: data.author || 'Creator',
+          thumbnail: thumb,
+          duration: data.lengthSeconds ? `${data.lengthSeconds}s` : 'Short',
+          sourceUrl: url,
+          directUrl: bestUrl,
+          formats: formats
+        };
+      } catch (err) {
+        lastError = err;
+        continue; // Try next node
+      }
+    }
+
+    throw new Error('Public YouTube nodes are currently busy. Please try again in a moment or run the local backend.');
+  };
+
+  /**
+   * Primary Engine: VKr public media extractor (for Instagram, Facebook, Kwai, TikTok)
    */
   const extractWithVkr = async (url) => {
     const apiUrl = `https://vkrdownloader.org/server/?api_key=vkrdownloader&vkr=${encodeURIComponent(url)}`;
@@ -218,10 +312,8 @@ document.addEventListener('DOMContentLoaded', () => {
       return link && isDirectMediaUrl(link);
     });
 
-    // Check if we found direct streams
     let bestUrl = '';
     if (validFormats.length > 0) {
-      // Prefer highest resolution mp4
       const mp4Formats = validFormats.filter(f => f.ext === 'mp4' || f.format_id?.includes('p'));
       bestUrl = (mp4Formats[0] || validFormats[0]).url || (mp4Formats[0] || validFormats[0]).download_url;
     } else if (isDirectMediaUrl(inner.source)) {
@@ -229,7 +321,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     if (!bestUrl) {
-      throw new Error('No direct video stream could be extracted from this URL.');
+      throw new Error('This platform returned 0 downloadable video streams. Please verify the post is public.');
     }
 
     return {
@@ -249,17 +341,20 @@ document.addEventListener('DOMContentLoaded', () => {
   };
 
   /**
-   * Secondary Engine: Cobalt Public Node Parser
+   * Cobalt Engine (Used only when user supplies a custom instance)
    */
   const extractWithCobalt = async (url, customEndpoint) => {
-    const endpoint = customEndpoint || 'https://api.cobalt.tools';
+    if (!customEndpoint) {
+      throw new Error('Please configure your custom Cobalt instance URL in Settings (gear icon).');
+    }
+
     const payload = {
       url: url,
       videoQuality: qualitySelect.value === 'max' ? 'max' : qualitySelect.value,
       downloadMode: qualitySelect.value === 'audio' ? 'audio' : 'auto'
     };
 
-    const res = await fetch(`${endpoint.replace(/\/+$/, '')}/`, {
+    const res = await fetch(`${customEndpoint.replace(/\/+$/, '')}/`, {
       method: 'POST',
       headers: {
         'Accept': 'application/json',
@@ -270,7 +365,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const data = await res.json();
     if (data.status === 'error') {
-      throw new Error(data.error?.code || 'Cobalt instance returned an error');
+      const code = data.error?.code || 'Cobalt instance error';
+      if (code.includes('auth') || code.includes('jwt')) {
+        throw new Error('This Cobalt instance requires an API key or authentication token.');
+      }
+      throw new Error(code);
     }
 
     const directUrl = data.url || (data.picker && data.picker[0]?.url);
@@ -295,7 +394,7 @@ document.addEventListener('DOMContentLoaded', () => {
   };
 
   /**
-   * Tertiary Engine: Local or Custom Self-Hosted yt-dlp micro-backend
+   * Local or Custom Self-Hosted yt-dlp micro-backend
    */
   const extractWithCustom = async (url, customEndpoint) => {
     if (!customEndpoint) throw new Error('Please enter your custom backend URL in Settings');
@@ -346,17 +445,23 @@ document.addEventListener('DOMContentLoaded', () => {
         loadingStatusText.textContent = 'Contacting custom backend...';
         result = await extractWithCustom(rawUrl, customApi);
       } else if (activeEngine === 'cobalt') {
-        loadingStatusText.textContent = 'Fetching from Cobalt network...';
+        loadingStatusText.textContent = 'Contacting Cobalt instance...';
         result = await extractWithCobalt(rawUrl, customApi);
       } else {
-        // Auto mode
-        try {
+        // Smart Auto Resolver based on Platform
+        if (detected && detected.key === 'youtube') {
+          loadingStatusText.textContent = 'Extracting YouTube Short streams...';
+          try {
+            result = await extractYouTubeInvidious(rawUrl);
+          } catch (ytErr) {
+            console.warn('Invidious resolver failed, trying fallback...', ytErr);
+            loadingStatusText.textContent = 'Trying secondary fallback...';
+            result = await extractWithVkr(rawUrl);
+          }
+        } else {
+          // Instagram, Facebook, Kuaishou, TikTok
           loadingStatusText.textContent = 'Extracting original video without watermark...';
           result = await extractWithVkr(rawUrl);
-        } catch (err1) {
-          console.warn('Primary engine failed:', err1);
-          loadingStatusText.textContent = 'Trying secondary fallback engine...';
-          result = await extractWithCobalt(rawUrl);
         }
       }
 
@@ -367,7 +472,12 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     } catch (err) {
       console.error(err);
-      showError(err.message || 'Failed to fetch video.', rawUrl, detected);
+      let userFriendlyMsg = err.message || 'Failed to fetch video.';
+      // Clean up internal error codes
+      if (userFriendlyMsg.includes('error.api.auth') || userFriendlyMsg.includes('jwt')) {
+        userFriendlyMsg = 'This public server requires authentication. Please use Auto mode or configure a custom instance in Settings.';
+      }
+      showError(userFriendlyMsg, rawUrl, detected);
     } finally {
       loadingState.classList.add('hidden');
       downloadBtn.disabled = false;
@@ -511,7 +621,6 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // Step 3: If in-memory download is blocked by CDN security, show clean Download Guide Modal
-    // instead of dumping the user into a new tab without instructions
     showDownloadGuideModal(url, filename);
   };
 
@@ -541,7 +650,7 @@ document.addEventListener('DOMContentLoaded', () => {
     downloadModalBody.innerHTML = `
       <div class="download-guide-box">
         <span class="guide-badge"><i data-lucide="shield-check"></i> Direct Stream Extracted</span>
-        <p>Because social platforms (Instagram / YouTube) restrict silent browser downloads from external websites, your browser requires a 1-click direct save:</p>
+        <p>Because social platforms (Instagram / YouTube) restrict silent background browser downloads, your browser requires a direct save:</p>
         <div class="step-list">
           <div class="step-item">
             <strong>Desktop:</strong> Click <em>"Open Video Stream"</em> below, then press <strong>Ctrl + S</strong> (or right-click the video & select <em>"Save video as..."</em>).
