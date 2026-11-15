@@ -130,7 +130,7 @@ document.addEventListener('DOMContentLoaded', () => {
     facebook: {
       name: 'Facebook Reels',
       icon: 'facebook',
-      pattern: /(?:facebook\.com\/(?:reel|watch|.*\/videos\/)|fb\.watch\/)/i
+      pattern: /(?:facebook\.com\/(?:reel|watch|share|.*\/videos\/)|fb\.watch\/)/i
     },
     tiktok: {
       name: 'TikTok',
@@ -288,16 +288,10 @@ document.addEventListener('DOMContentLoaded', () => {
   const extractKuaishou = async (url) => {
     const clean = cleanInputUrl(url);
     
-    // Method A: Dedicated API endpoint
+    // Method A: Dedicated API endpoint (clean fetch without custom headers for CORS)
     try {
       const apiUrl = `https://backend1.tioo.eu.org/kuaishou?url=${encodeURIComponent(clean)}`;
-      const res = await fetch(apiUrl, {
-        headers: {
-          'Accept': 'application/json',
-          'User-Agent': 'btch/2.2.0',
-          'X-Client-Version': '2.2.0'
-        }
-      });
+      const res = await fetch(apiUrl);
       if (res.ok) {
         const data = await res.json();
         const info = data.result || data;
@@ -312,7 +306,7 @@ document.addEventListener('DOMContentLoaded', () => {
             sourceUrl: clean,
             directUrl: videoUrl,
             audioUrl: '',
-            qualityLabel: `${resLabel} (Original Sound)`
+            qualityLabel: `${resLabel} (Clean No Watermark)`
           };
         }
       }
@@ -360,27 +354,26 @@ document.addEventListener('DOMContentLoaded', () => {
     // Method A: Dedicated Instagram API
     try {
       const apiUrl = `https://backend1.tioo.eu.org/igdl?url=${encodeURIComponent(clean)}`;
-      const res = await fetch(apiUrl, {
-        headers: {
-          'Accept': 'application/json',
-          'User-Agent': 'btch/2.2.0',
-          'X-Client-Version': '2.2.0'
-        }
-      });
+      const res = await fetch(apiUrl);
       if (res.ok) {
-        const data = await res.json();
-        let target = Array.isArray(data) ? data[0] : (data.result ? data.result[0] : data);
-        if (target && target.url) {
-          return {
-            title: 'Instagram Reel',
-            author: 'Instagram Creator',
-            thumbnail: target.thumbnail || '',
-            duration: 'Full Reel',
-            sourceUrl: clean,
-            directUrl: target.url,
-            audioUrl: '',
-            qualityLabel: '1080p Full HD (Original Audio)'
-          };
+        const text = await res.text();
+        try {
+          const data = JSON.parse(text);
+          let target = Array.isArray(data) ? data[0] : (data.result ? data.result[0] : data);
+          if (target && target.url) {
+            return {
+              title: 'Instagram Reel',
+              author: 'Instagram Creator',
+              thumbnail: target.thumbnail || '',
+              duration: 'Full Reel',
+              sourceUrl: clean,
+              directUrl: target.url,
+              audioUrl: '',
+              qualityLabel: '1080p Full HD (Original Audio)'
+            };
+          }
+        } catch (pe) {
+          console.warn('Instagram API returned non-JSON:', text);
         }
       }
     } catch (e1) {
@@ -416,7 +409,7 @@ document.addEventListener('DOMContentLoaded', () => {
       console.warn('Instagram embed fallback error:', e2);
     }
 
-    throw new Error('Unable to fetch Instagram Reel. Ensure the post is from a public account.');
+    throw new Error('Unable to fetch Instagram Reel. Instagram may require authentication or is rate-limiting public requests.');
   };
 
   /**
@@ -429,13 +422,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // Method A: Dedicated Facebook stream extractor
     try {
       const apiUrl = `https://backend1.tioo.eu.org/fbdown?url=${encodeURIComponent(clean)}`;
-      const res = await fetch(apiUrl, {
-        headers: {
-          'Accept': 'application/json',
-          'User-Agent': 'btch/2.2.0',
-          'X-Client-Version': '2.2.0'
-        }
-      });
+      const res = await fetch(apiUrl);
       if (res.ok) {
         const data = await res.json();
         const bestUrl = data.HD || data.Normal_video || data.sd || data.hd;
@@ -793,26 +780,40 @@ document.addEventListener('DOMContentLoaded', () => {
   const triggerFileDownload = async (url, filename) => {
     if (!url) return;
 
-    // Direct anchor click (browser native download)
+    // 1. Try to fetch as Blob first for clean native saving
+    try {
+      const res = await fetch(url, { referrerPolicy: 'no-referrer' });
+      if (res.ok) {
+        const blob = await res.blob();
+        saveBlobLocally(blob, filename);
+        indicateSuccess();
+        return;
+      }
+    } catch (e) {
+      console.warn('Direct blob fetch failed (cross-origin restriction):', e);
+    }
+
+    // 2. Direct anchor click fallback (target _blank avoids replacing web app window)
     const a = document.createElement('a');
     a.href = url;
     a.download = filename;
-    a.target = '_self';
+    a.target = '_blank';
+    a.rel = 'noopener noreferrer';
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
 
-    indicateSuccess();
+    indicateSuccess('Download link opened! (Press Ctrl+S to save if playing)');
   };
 
-  const indicateSuccess = () => {
+  const indicateSuccess = (msg = 'Download Started!') => {
     const originalText = directDownloadBtn.innerHTML;
-    directDownloadBtn.innerHTML = `<i data-lucide="check-circle-2"></i> <span>Download Started!</span>`;
+    directDownloadBtn.innerHTML = `<i data-lucide="check-circle-2"></i> <span>${msg}</span>`;
     if (window.lucide) window.lucide.createIcons();
     setTimeout(() => {
       directDownloadBtn.innerHTML = originalText;
       if (window.lucide) window.lucide.createIcons();
-    }, 3000);
+    }, 4000);
   };
 
   const getSafeFilename = (title, ext = 'mp4') => {
