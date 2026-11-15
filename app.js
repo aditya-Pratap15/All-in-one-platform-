@@ -1,6 +1,7 @@
 /**
  * OmniDownloader - Client-Side Controller
- * Multi-Platform Media Extractor & Downloader
+ * Multi-Platform Media Extractor & Instant Downloader
+ * Supports YouTube Shorts, Instagram Reels, Facebook Reels, Kuaishou/Kwai, TikTok
  */
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -40,9 +41,8 @@ document.addEventListener('DOMContentLoaded', () => {
   const directDownloadBtn = document.getElementById('directDownloadBtn');
   const downloadBtnText = document.getElementById('downloadBtnText');
   const copyLinkBtn = document.getElementById('copyLinkBtn');
-  const audioDownloadLink = document.getElementById('audioDownloadLink');
 
-  // Modals
+  // Modals & Settings
   const settingsBtn = document.getElementById('settingsBtn');
   const settingsModal = document.getElementById('settingsModal');
   const closeSettingsBtn = document.getElementById('closeSettingsBtn');
@@ -62,7 +62,7 @@ document.addEventListener('DOMContentLoaded', () => {
   let customApi = localStorage.getItem('omni_custom_api') || '';
   let autoPreview = localStorage.getItem('omni_auto_preview') !== 'false';
 
-  // --- Audio / Video Synchronization for In-Browser Sound ---
+  // --- Synchronize Audio & Video for Dual-Stream Playback (YouTube) ---
   if (videoPlayer && audioPlayer) {
     videoPlayer.addEventListener('play', () => {
       if (audioPlayer.src) {
@@ -112,25 +112,25 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // --- Platform Detection Patterns ---
   const PLATFORMS = {
-    youtube: {
-      name: 'YouTube Shorts',
-      icon: 'play-circle',
-      pattern: /(?:youtube\.com\/(?:shorts\/[a-zA-Z0-9_-]{11}|watch\?v=[a-zA-Z0-9_-]{11})|youtu\.be\/[a-zA-Z0-9_-]{11})/i
+    kuaishou: {
+      name: 'Kuaishou / Kwai',
+      icon: 'video',
+      pattern: /(?:kuaishou\.com|kwai\.com|kwai-video\.com|v\.kuaishou\.com)/i
     },
     instagram: {
       name: 'Instagram Reels',
       icon: 'instagram',
       pattern: /instagram\.com\/(?:reel|p|tv)\//i
     },
+    youtube: {
+      name: 'YouTube Shorts',
+      icon: 'play-circle',
+      pattern: /(?:youtube\.com\/(?:shorts\/[a-zA-Z0-9_-]{11}|watch\?v=[a-zA-Z0-9_-]{11})|youtu\.be\/[a-zA-Z0-9_-]{11})/i
+    },
     facebook: {
       name: 'Facebook Reels',
       icon: 'facebook',
       pattern: /(?:facebook\.com\/(?:reel|watch|.*\/videos\/)|fb\.watch\/)/i
-    },
-    kuaishou: {
-      name: 'Kuaishou / Kwai',
-      icon: 'video',
-      pattern: /(?:kuaishou\.com|kwai\.com|kwai-video\.com|v\.kuaishou\.com)/i
     },
     tiktok: {
       name: 'TikTok',
@@ -139,18 +139,55 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   };
 
+  /**
+   * Sanitizes dirty user input (e.g. mobile share captions with Chinese/English text)
+   * and extracts only the pure, clean target URL with tracking params stripped.
+   */
+  const cleanInputUrl = (raw) => {
+    if (!raw || typeof raw !== 'string') return '';
+    const match = raw.match(/https?:\/\/[^\s"'<>]+/i);
+    let url = match ? match[0] : raw.trim();
+    
+    // Strip trailing punctuation often copied from mobile share sheets
+    url = url.replace(/[.,;!?，。！？"'\)\]]+$/, '');
+
+    try {
+      const parsed = new URL(url);
+      if (parsed.hostname.includes('instagram.com')) {
+        // Strip tracking tokens (?utm_source=...&mdxt=...)
+        parsed.search = '';
+        return parsed.toString();
+      }
+      if (parsed.hostname.includes('youtube.com') || parsed.hostname.includes('youtu.be')) {
+        if (parsed.pathname.includes('/shorts/')) {
+          parsed.search = '';
+        } else if (parsed.searchParams.has('v')) {
+          const v = parsed.searchParams.get('v');
+          parsed.search = `?v=${v}`;
+        }
+        return parsed.toString();
+      }
+      if (parsed.hostname.includes('facebook.com') || parsed.hostname.includes('fb.watch')) {
+        parsed.search = '';
+        return parsed.toString();
+      }
+    } catch (e) {}
+
+    return url;
+  };
+
   const isProfileOrChannelUrl = (url) => {
     if (!url) return null;
     if (/(?:youtube\.com\/(?:@|channel\/|c\/|user\/))/i.test(url)) {
       return {
         platform: 'YouTube',
-        message: 'This is a YouTube Channel profile link. Please click on a specific Short video, tap "Share" → "Copy Link", and paste that video URL here (e.g. https://youtube.com/shorts/VIDEO_ID).'
+        message: 'This is a YouTube Channel link. Please copy and paste a link to an individual Short video.'
       };
     }
     if (/(?:instagram\.com\/(?!reel\/|p\/|tv\/)[a-zA-Z0-9_.-]+\/?$)/i.test(url)) {
       return {
         platform: 'Instagram',
-        message: 'This is an Instagram Profile link. Please open a specific Reel or video post and copy its link.'
+        message: 'This is an Instagram Profile link. Please copy and paste an individual Reel or video link.'
       };
     }
     if (/(?:tiktok\.com\/@[a-zA-Z0-9_.-]+\/?$)/i.test(url)) {
@@ -163,9 +200,10 @@ document.addEventListener('DOMContentLoaded', () => {
   };
 
   const detectPlatform = (url) => {
+    const clean = cleanInputUrl(url);
     for (const [key, val] of Object.entries(PLATFORMS)) {
-      if (val.pattern.test(url)) {
-        return { key, ...val };
+      if (val.pattern.test(clean)) {
+        return { key, ...val, cleanUrl: clean };
       }
     }
     return null;
@@ -176,17 +214,18 @@ document.addEventListener('DOMContentLoaded', () => {
     return match ? match[1] : null;
   };
 
-  // --- Input Handlers ---
+  // --- Input Event Handlers ---
   const handleUrlChange = () => {
-    const url = videoUrlInput.value.trim();
-    if (url) {
+    const raw = videoUrlInput.value.trim();
+    if (raw) {
       clearBtn.classList.remove('hidden');
     } else {
       clearBtn.classList.add('hidden');
     }
 
-    const channelNotice = isProfileOrChannelUrl(url);
-    const platform = detectPlatform(url);
+    const clean = cleanInputUrl(raw);
+    const channelNotice = isProfileOrChannelUrl(clean);
+    const platform = detectPlatform(clean);
     const platformTags = document.querySelectorAll('.platform-tag');
     platformTags.forEach(tag => tag.classList.remove('active'));
 
@@ -226,7 +265,7 @@ document.addEventListener('DOMContentLoaded', () => {
         fetchVideo();
       }
     } catch (err) {
-      alert('Unable to access clipboard. Please paste the link manually into the input box.');
+      alert('Please paste your video link directly into the input box.');
     }
   });
 
@@ -240,20 +279,189 @@ document.addEventListener('DOMContentLoaded', () => {
     fetchVideo();
   });
 
-  // --- Helpers ---
-  const isDirectMediaUrl = (url) => {
-    if (!url || typeof url !== 'string') return false;
-    if (url.includes('youtube.com/watch') || url.includes('youtube.com/shorts') ||
-        url.includes('instagram.com/reel') || url.includes('facebook.com/reel')) {
-      return false;
-    }
-    return true;
-  };
-
-  // --- API Extraction Engines ---
+  // --- Extractor Implementations ---
 
   /**
-   * Dedicated YouTube Invidious Multi-Node Resolver with Audio Track Support
+   * 1. Kuaishou (快手) / Kwai Extractor
+   * Direct high-speed extraction without watermark, original sound preserved.
+   */
+  const extractKuaishou = async (url) => {
+    const clean = cleanInputUrl(url);
+    
+    // Method A: Dedicated API endpoint
+    try {
+      const apiUrl = `https://backend1.tioo.eu.org/kuaishou?url=${encodeURIComponent(clean)}`;
+      const res = await fetch(apiUrl, {
+        headers: {
+          'Accept': 'application/json',
+          'User-Agent': 'btch/2.2.0',
+          'X-Client-Version': '2.2.0'
+        }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        const info = data.result || data;
+        const videoUrl = info.videoUrl || info.url;
+        if (videoUrl) {
+          const resLabel = (info.width && info.height) ? `${info.width}x${info.height} HD` : 'Original HD';
+          return {
+            title: info.title || 'Kuaishou Video',
+            author: info.author || info.username || 'Kuaishou Creator',
+            thumbnail: info.thumbnail || '',
+            duration: info.duration ? `${Math.round(info.duration / 1000)}s` : 'Original Length',
+            sourceUrl: clean,
+            directUrl: videoUrl,
+            audioUrl: '',
+            qualityLabel: `${resLabel} (Original Sound)`
+          };
+        }
+      }
+    } catch (e1) {
+      console.warn('Kuaishou primary endpoint error:', e1);
+    }
+
+    // Method B: Direct HTML Redirect & Apollo State Scraper via CORS proxy
+    try {
+      const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(clean)}`;
+      const res = await fetch(proxyUrl);
+      if (res.ok) {
+        const html = await res.text();
+        const photoUrlMatch = html.match(/["']photoUrl["']\s*:\s*["']([^"']+)["']/i) ||
+                              html.match(/https?:\/\/[^"']+\.kwaicdn\.com\/[^"']+\.mp4[^"']*/i);
+        if (photoUrlMatch) {
+          const videoUrl = (photoUrlMatch[1] || photoUrlMatch[0]).replace(/\\u002F/g, '/');
+          const titleMatch = html.match(/<title>([^<]+)<\/title>/i);
+          return {
+            title: titleMatch ? titleMatch[1].replace(/ - 快手.*$/, '') : 'Kuaishou Video',
+            author: 'Kuaishou Creator',
+            thumbnail: '',
+            duration: 'Full Video',
+            sourceUrl: clean,
+            directUrl: videoUrl,
+            audioUrl: '',
+            qualityLabel: 'Original Quality (Clean No Watermark)'
+          };
+        }
+      }
+    } catch (e2) {
+      console.warn('Kuaishou fallback proxy error:', e2);
+    }
+
+    throw new Error('Unable to extract Kuaishou video. Please verify the link is active.');
+  };
+
+  /**
+   * 2. Instagram Reels Extractor
+   * Direct stream extraction in full original bitrate with crystal clear audio.
+   */
+  const extractInstagram = async (url) => {
+    const clean = cleanInputUrl(url);
+
+    // Method A: Dedicated Instagram API
+    try {
+      const apiUrl = `https://backend1.tioo.eu.org/igdl?url=${encodeURIComponent(clean)}`;
+      const res = await fetch(apiUrl, {
+        headers: {
+          'Accept': 'application/json',
+          'User-Agent': 'btch/2.2.0',
+          'X-Client-Version': '2.2.0'
+        }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        let target = Array.isArray(data) ? data[0] : (data.result ? data.result[0] : data);
+        if (target && target.url) {
+          return {
+            title: 'Instagram Reel',
+            author: 'Instagram Creator',
+            thumbnail: target.thumbnail || '',
+            duration: 'Full Reel',
+            sourceUrl: clean,
+            directUrl: target.url,
+            audioUrl: '',
+            qualityLabel: '1080p Full HD (Original Audio)'
+          };
+        }
+      }
+    } catch (e1) {
+      console.warn('Instagram primary endpoint error:', e1);
+    }
+
+    // Method B: Captioned Embed parser
+    try {
+      const shortcodeMatch = clean.match(/(?:reel|p|tv)\/([a-zA-Z0-9_-]+)/);
+      if (shortcodeMatch) {
+        const code = shortcodeMatch[1];
+        const embedUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(`https://www.instagram.com/reel/${code}/embed/captioned/`)}`;
+        const res = await fetch(embedUrl);
+        if (res.ok) {
+          const html = await res.text();
+          const videoMatch = html.match(/video_url["']\s*:\s*["']([^"']+)["']/i);
+          if (videoMatch) {
+            const directUrl = videoMatch[1].replace(/\\u0026/g, '&');
+            return {
+              title: 'Instagram Reel',
+              author: 'Instagram Creator',
+              thumbnail: '',
+              duration: 'Full Reel',
+              sourceUrl: clean,
+              directUrl: directUrl,
+              audioUrl: '',
+              qualityLabel: 'Original Quality (Complete Audio)'
+            };
+          }
+        }
+      }
+    } catch (e2) {
+      console.warn('Instagram embed fallback error:', e2);
+    }
+
+    throw new Error('Unable to fetch Instagram Reel. Ensure the post is from a public account.');
+  };
+
+  /**
+   * 3. Facebook Reels Extractor
+   * Combined high resolution MP4 with full audio.
+   */
+  const extractFacebook = async (url) => {
+    const clean = cleanInputUrl(url);
+
+    // Method A: Dedicated Facebook stream extractor
+    try {
+      const apiUrl = `https://backend1.tioo.eu.org/fbdown?url=${encodeURIComponent(clean)}`;
+      const res = await fetch(apiUrl, {
+        headers: {
+          'Accept': 'application/json',
+          'User-Agent': 'btch/2.2.0',
+          'X-Client-Version': '2.2.0'
+        }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        const bestUrl = data.HD || data.Normal_video || data.sd || data.hd;
+        if (bestUrl) {
+          return {
+            title: 'Facebook Reel',
+            author: 'Facebook Creator',
+            thumbnail: '',
+            duration: 'Full Reel',
+            sourceUrl: clean,
+            directUrl: bestUrl,
+            audioUrl: '',
+            qualityLabel: data.HD ? 'HD 1080p (Complete Audio)' : 'SD (Complete Audio)'
+          };
+        }
+      }
+    } catch (e1) {
+      console.warn('Facebook endpoint error:', e1);
+    }
+
+    throw new Error('Unable to extract Facebook video. Please check that the Reel is publicly viewable.');
+  };
+
+  /**
+   * 4. YouTube Shorts Invidious Extractor
+   * Prioritizes merged streams (formatStreams) with video + audio in one container.
    */
   const INVIDIOUS_NODES = [
     'https://yt.chocolatemoo53.com',
@@ -263,7 +471,8 @@ document.addEventListener('DOMContentLoaded', () => {
   ];
 
   const extractYouTubeInvidious = async (url) => {
-    const videoId = extractYouTubeId(url);
+    const clean = cleanInputUrl(url);
+    const videoId = extractYouTubeId(clean);
     if (!videoId) throw new Error('Could not parse YouTube video ID from URL');
 
     for (const node of INVIDIOUS_NODES) {
@@ -286,23 +495,24 @@ document.addEventListener('DOMContentLoaded', () => {
         let bestQualityLabel = '1080p Full HD';
         let bestAudioUrl = '';
 
-        // Check for progressive audio stream
+        // Progressive audio stream
         const audioStream = rawAdaptive.find(f => f.url && f.type && f.type.includes('audio/mp4')) ||
                             rawAdaptive.find(f => f.url && f.type && f.type.includes('audio/'));
         if (audioStream) {
           bestAudioUrl = audioStream.url;
         }
 
-        // 1. Check if merged audio+video streams exist (itag 18 or 22)
+        // 1. Check if merged audio+video stream exists
         if (rawStreams.length > 0) {
-          const merged = rawStreams.filter(s => s.url && isDirectMediaUrl(s.url));
+          const merged = rawStreams.filter(s => s.url);
           if (merged.length > 0) {
-            bestVideoUrl = merged[merged.length - 1].url;
-            bestQualityLabel = merged[merged.length - 1].resolution || '720p HD (Muxed Sound)';
+            const top = merged[merged.length - 1];
+            bestVideoUrl = top.url;
+            bestQualityLabel = top.resolution || top.qualityLabel || '720p HD (Merged Sound)';
           }
         }
 
-        // 2. If no merged stream, pick highest adaptive video stream
+        // 2. Adaptive stream fallback (highest quality mp4)
         if (!bestVideoUrl) {
           const videoStreams = rawAdaptive.filter(f => f.url && f.type && f.type.includes('video/mp4'));
           if (videoStreams.length > 0) {
@@ -323,7 +533,7 @@ document.addEventListener('DOMContentLoaded', () => {
           author: data.author || 'Creator',
           thumbnail: thumb,
           duration: data.lengthSeconds ? `${data.lengthSeconds}s` : 'Full Length',
-          sourceUrl: url,
+          sourceUrl: clean,
           directUrl: bestVideoUrl,
           audioUrl: bestAudioUrl,
           qualityLabel: bestQualityLabel
@@ -333,213 +543,170 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     }
 
-    throw new Error('Public YouTube nodes are currently busy. Please try again in a moment or run the local backend.');
+    throw new Error('Public YouTube nodes are currently busy. Please try again or use the local backend.');
   };
 
   /**
-   * Primary Engine: VKr public media extractor (for Instagram, Facebook, Kwai, TikTok)
-   * Note: Instagram, Facebook, and TikTok CDN streams already bundle video + audio together!
+   * 5. TikTok Extractor
    */
-  const extractWithVkr = async (url) => {
-    const apiUrl = `https://vkrdownloader.org/server/?api_key=vkrdownloader&vkr=${encodeURIComponent(url)}`;
-    const res = await fetch(apiUrl, { method: 'GET' });
-    if (!res.ok) throw new Error(`HTTP error ${res.status}`);
-    const data = await res.json();
-    
-    if (!data || data.error || (data.success === false)) {
-      throw new Error(data.message || 'Unable to parse this video link');
-    }
-
-    const inner = data.data || data;
-    const rawFormats = inner.downloads || inner.formats || [];
-    
-    const validFormats = rawFormats.filter(f => {
-      const link = f.url || f.download_url;
-      return link && isDirectMediaUrl(link);
-    });
-
-    let bestUrl = '';
-    let qualityLabel = 'Full HD (Original Sound)';
-
-    if (validFormats.length > 0) {
-      const mp4Formats = validFormats.filter(f => f.ext === 'mp4' || f.format_id?.includes('p'));
-      const chosen = mp4Formats[0] || validFormats[0];
-      bestUrl = chosen.url || chosen.download_url;
-      qualityLabel = chosen.format_id || chosen.quality || 'Full HD (Original Sound)';
-    } else if (isDirectMediaUrl(inner.source)) {
-      bestUrl = inner.source;
-    }
-
-    if (!bestUrl) {
-      throw new Error('This platform returned 0 downloadable video streams. Please verify the post is public.');
-    }
-
-    return {
-      title: inner.title || 'Extracted Video',
-      author: inner.channel || inner.author || inner.uploader || 'Creator',
-      thumbnail: inner.thumbnail || inner.picture || '',
-      duration: inner.duration || 'Full Quality',
-      sourceUrl: url,
-      directUrl: bestUrl,
-      audioUrl: '',
-      qualityLabel: qualityLabel
-    };
-  };
-
-  /**
-   * Cobalt Engine (Only when user supplies a custom instance in Settings)
-   */
-  const extractWithCobalt = async (url, customEndpoint) => {
-    if (!customEndpoint) {
-      throw new Error('Please configure your custom Cobalt instance URL in Settings (gear icon).');
-    }
-
-    const payload = {
-      url: url,
-      videoQuality: qualitySelect.value === 'max' ? 'max' : qualitySelect.value,
-      downloadMode: qualitySelect.value === 'audio' ? 'audio' : 'auto'
-    };
-
-    const res = await fetch(`${customEndpoint.replace(/\/+$/, '')}/`, {
-      method: 'POST',
-      headers: {
-        'Accept': 'application/json',
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify(payload)
-    });
-
-    const data = await res.json();
-    if (data.status === 'error') {
-      const code = data.error?.code || 'Cobalt instance error';
-      if (code.includes('auth') || code.includes('jwt')) {
-        throw new Error('This Cobalt instance requires an API key or authentication token.');
+  const extractTikTok = async (url) => {
+    const clean = cleanInputUrl(url);
+    try {
+      const res = await fetch(`https://www.tikwm.com/api/?url=${encodeURIComponent(clean)}&hd=1`);
+      if (res.ok) {
+        const data = await res.json();
+        if (data.data && (data.data.play || data.data.hdplay)) {
+          const d = data.data;
+          return {
+            title: d.title || 'TikTok Video',
+            author: d.author?.nickname || 'TikTok Creator',
+            thumbnail: d.cover || '',
+            duration: d.duration ? `${d.duration}s` : 'Full Video',
+            sourceUrl: clean,
+            directUrl: d.hdplay || d.play,
+            audioUrl: '',
+            qualityLabel: 'Original Bitrate (No Watermark)'
+          };
+        }
       }
-      throw new Error(code);
-    }
-
-    const directUrl = data.url || (data.picker && data.picker[0]?.url);
-    if (!directUrl || !isDirectMediaUrl(directUrl)) {
-      throw new Error('No stream URL was returned by Cobalt');
-    }
-
-    return {
-      title: 'Extracted Video',
-      author: 'Creator',
-      thumbnail: '',
-      duration: 'HD',
-      sourceUrl: url,
-      directUrl: directUrl,
-      audioUrl: '',
-      qualityLabel: 'Max Bitrate (Original Sound)'
-    };
+    } catch (e) {}
+    throw new Error('Unable to extract TikTok video. Please ensure the video is public.');
   };
 
   /**
-   * Local or Custom Self-Hosted yt-dlp micro-backend
+   * Custom / Local yt-dlp backend
    */
   const extractWithCustom = async (url, customEndpoint) => {
     if (!customEndpoint) throw new Error('Please enter your custom backend URL in Settings');
     const endpoint = customEndpoint.replace(/\/+$/, '');
-    
-    const res = await fetch(`${endpoint}/download?url=${encodeURIComponent(url)}`, { method: 'GET' });
+    const clean = cleanInputUrl(url);
+
+    const res = await fetch(`${endpoint}/download?url=${encodeURIComponent(clean)}`, { method: 'GET' });
     if (!res.ok) throw new Error(`Custom backend returned HTTP ${res.status}`);
     const data = await res.json();
 
-    if (!data.url || !isDirectMediaUrl(data.url)) {
-      throw new Error('Custom backend did not return a playable video stream URL');
-    }
+    if (!data.url) throw new Error('Backend did not return a valid stream URL');
 
     return {
       title: data.title || 'Video',
       author: data.uploader || 'Creator',
       thumbnail: data.thumbnail || '',
       duration: data.duration ? `${Math.floor(data.duration / 60)}:${data.duration % 60}` : 'Short',
-      sourceUrl: url,
+      sourceUrl: clean,
       directUrl: data.url,
       audioUrl: '',
-      qualityLabel: '1080p/4K Merged (Full Audio+Video)'
+      qualityLabel: '1080p/4K Merged (Original Audio)'
     };
   };
 
   // --- Main Fetch Function ---
   const fetchVideo = async () => {
-    const rawUrl = videoUrlInput.value.trim();
-    if (!rawUrl) {
-      showError('Please paste a valid video URL first.');
+    const rawInput = videoUrlInput.value.trim();
+    if (!rawInput) {
+      showError('Please paste a video link into the input box.');
       return;
     }
 
-    const profileWarning = isProfileOrChannelUrl(rawUrl);
+    const cleanUrl = cleanInputUrl(rawInput);
+    const profileWarning = isProfileOrChannelUrl(cleanUrl);
     if (profileWarning) {
-      showError(profileWarning.message, rawUrl);
+      showError(profileWarning.message, cleanUrl);
       return;
     }
 
     hideStates();
     loadingState.classList.remove('hidden');
-    loadingStatusText.textContent = 'Resolving media stream...';
+    loadingStatusText.textContent = 'Resolving media stream... (Step 1/2)';
     downloadBtn.disabled = true;
 
-    const detected = detectPlatform(rawUrl);
+    const detected = detectPlatform(cleanUrl);
     let result = null;
 
     try {
       if (activeEngine === 'custom') {
-        loadingStatusText.textContent = 'Contacting custom backend...';
-        result = await extractWithCustom(rawUrl, customApi);
-      } else if (activeEngine === 'cobalt') {
-        loadingStatusText.textContent = 'Contacting Cobalt instance...';
-        result = await extractWithCobalt(rawUrl, customApi);
+        loadingStatusText.textContent = 'Connecting to custom engine...';
+        result = await extractWithCustom(cleanUrl, customApi);
       } else {
-        if (detected && detected.key === 'youtube') {
+        if (detected?.key === 'kuaishou') {
+          loadingStatusText.textContent = 'Extracting Kuaishou / Kwai original video...';
+          result = await extractKuaishou(cleanUrl);
+        } else if (detected?.key === 'instagram') {
+          loadingStatusText.textContent = 'Extracting Instagram Reel full quality stream...';
+          result = await extractInstagram(cleanUrl);
+        } else if (detected?.key === 'facebook') {
+          loadingStatusText.textContent = 'Extracting Facebook Reel video & audio...';
+          result = await extractFacebook(cleanUrl);
+        } else if (detected?.key === 'youtube') {
           loadingStatusText.textContent = 'Extracting YouTube Short streams...';
-          try {
-            result = await extractYouTubeInvidious(rawUrl);
-          } catch (ytErr) {
-            console.warn('Invidious resolver failed, trying fallback...', ytErr);
-            loadingStatusText.textContent = 'Trying secondary fallback...';
-            result = await extractWithVkr(rawUrl);
-          }
+          result = await extractYouTubeInvidious(cleanUrl);
+        } else if (detected?.key === 'tiktok') {
+          loadingStatusText.textContent = 'Extracting TikTok video without watermark...';
+          result = await extractTikTok(cleanUrl);
         } else {
-          loadingStatusText.textContent = 'Extracting original video without watermark...';
-          result = await extractWithVkr(rawUrl);
+          // Auto detect attempt across engines
+          try {
+            result = await extractInstagram(cleanUrl);
+          } catch (e1) {
+            try {
+              result = await extractKuaishou(cleanUrl);
+            } catch (e2) {
+              result = await extractYouTubeInvidious(cleanUrl);
+            }
+          }
         }
       }
 
-      if (result && result.directUrl) {
-        displayResult(result, detected);
-      } else {
+      if (!result || !result.directUrl) {
         throw new Error('Could not find a downloadable video stream for this link.');
       }
+
+      // Pre-buffering Step: Pre-fetch video blob into memory for instant 0-second saving!
+      loadingStatusText.textContent = 'Pre-buffering video file for instant 0s download... (Step 2/2)';
+      
+      try {
+        const ctrl = new AbortController();
+        const timeout = setTimeout(() => ctrl.abort(), 14000);
+        const videoRes = await fetch(result.directUrl, {
+          signal: ctrl.signal,
+          referrerPolicy: 'no-referrer'
+        });
+        clearTimeout(timeout);
+
+        if (videoRes.ok) {
+          result.preloadedBlob = await videoRes.blob();
+          result.preloadedBlobUrl = URL.createObjectURL(result.preloadedBlob);
+        }
+      } catch (blobErr) {
+        console.warn('Direct pre-buffering skipped (cross-origin streaming enabled):', blobErr);
+      }
+
+      displayResult(result, detected);
     } catch (err) {
       console.error(err);
       let userFriendlyMsg = err.message || 'Failed to fetch video.';
       if (userFriendlyMsg.includes('404')) {
-        userFriendlyMsg = 'Video not found (404). Please ensure the link points to a single video/reel and not a channel page or private account.';
-      } else if (userFriendlyMsg.includes('error.api.auth') || userFriendlyMsg.includes('jwt')) {
-        userFriendlyMsg = 'This public server requires authentication. Please use Auto mode or configure a custom instance in Settings.';
+        userFriendlyMsg = 'Video not found (404). Ensure the link points directly to a single public reel/short.';
       }
-      showError(userFriendlyMsg, rawUrl, detected);
+      showError(userFriendlyMsg, cleanUrl, detected);
     } finally {
       loadingState.classList.add('hidden');
       downloadBtn.disabled = false;
     }
   };
 
-  // --- Display Result (Clean Single Button UI) ---
+  // --- Display Result (Single Download Button, Pre-Buffered, Complete Sound) ---
   const displayResult = (data, platform) => {
     currentVideoData = data;
     hideStates();
     resultCard.classList.remove('hidden');
 
-    // Metadata
+    // Title & Metadata
     videoTitle.textContent = data.title || 'Shorts / Reel Video';
-    videoAuthor.textContent = `Uploaded by: ${data.author || 'Creator'}`;
+    videoAuthor.textContent = `Creator: ${data.author || 'Original Author'}`;
     durationBadge.textContent = data.duration || 'Full Quality';
     resultPlatformText.textContent = platform ? platform.name : 'Video';
 
-    // Video Player & Preview Setup
+    // Player setup: use pre-buffered blob if available, otherwise direct stream
     videoPlayer.classList.remove('hidden');
     videoThumbnail.classList.add('hidden');
     previewFallbackNotice.classList.add('hidden');
@@ -551,46 +718,50 @@ document.addEventListener('DOMContentLoaded', () => {
       videoPlayer.removeAttribute('poster');
     }
 
-    // Set the direct video stream source
-    videoPlayer.src = data.directUrl;
+    const playSource = data.preloadedBlobUrl || data.directUrl;
+    videoPlayer.src = playSource;
     videoPlayer.load();
 
-    // Link audio track if available (for YouTube stereo sound synchronization)
+    // Secondary audio track synchronization for YouTube if separate
     if (data.audioUrl) {
       audioPlayer.src = data.audioUrl;
       audioPlayer.load();
-      if (audioDownloadLink) {
-        audioDownloadLink.href = data.audioUrl;
-        audioDownloadLink.classList.remove('hidden');
-      }
     } else {
       audioPlayer.removeAttribute('src');
-      if (audioDownloadLink) audioDownloadLink.classList.add('hidden');
     }
 
     videoPlayer.onerror = () => {
-      console.warn('Browser video element was blocked from streaming this CDN URL');
+      console.warn('Video preview element error on CDN URL');
       videoPlayer.classList.add('hidden');
-      if (data.thumbnail) {
-        videoThumbnail.classList.remove('hidden');
-      }
+      if (data.thumbnail) videoThumbnail.classList.remove('hidden');
       previewFallbackNotice.classList.remove('hidden');
     };
 
-    // Update Single Download Button & Quality Badge
+    // Quality Badge
     if (qualityBadgeText) {
-      qualityBadgeText.textContent = `${data.qualityLabel || 'Highest Resolution (1080p Full HD)'} • No Watermark`;
-    }
-    if (downloadBtnText) {
-      downloadBtnText.textContent = `Download Video (${data.qualityLabel ? data.qualityLabel.split(' ')[0] : 'Full HD'})`;
+      qualityBadgeText.textContent = `${data.qualityLabel || 'Highest Resolution Fetched'} • Ready to Save`;
     }
 
-    // Primary Single Download Button Click Event
+    // Single Download Button
+    if (downloadBtnText) {
+      downloadBtnText.textContent = `Download Video (${data.qualityLabel ? data.qualityLabel.split(' ')[0] : 'Highest Quality'})`;
+    }
+
+    // INSTANT DOWNLOAD HANDLER (0 Delay):
     directDownloadBtn.onclick = () => {
-      triggerFileDownload(data.directUrl, getSafeFilename(data.title, 'mp4'));
+      const filename = getSafeFilename(data.title, 'mp4');
+      
+      if (data.preloadedBlob) {
+        // Instant save from pre-buffered RAM! Zero waiting, zero loading spinner!
+        saveBlobLocally(data.preloadedBlob, filename);
+        indicateSuccess();
+      } else {
+        // Direct save trigger
+        triggerFileDownload(data.directUrl, filename);
+      }
     };
 
-    // Copy direct link button
+    // Copy stream link button
     copyLinkBtn.onclick = () => {
       navigator.clipboard.writeText(data.directUrl).then(() => {
         const originalText = copyLinkBtn.innerHTML;
@@ -607,53 +778,7 @@ document.addEventListener('DOMContentLoaded', () => {
     resultCard.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   };
 
-  // --- Direct One-Click Download Function (NO MODAL) ---
-  const triggerFileDownload = async (url, filename) => {
-    if (!url) return;
-
-    directDownloadBtn.disabled = true;
-    const originalText = directDownloadBtn.innerHTML;
-    directDownloadBtn.innerHTML = `<div class="btn-spinner"></div> <span>Downloading to your device...</span>`;
-
-    // 1. Attempt direct fetch to convert to Blob (cleanest file saving)
-    try {
-      const res = await fetch(url, { referrerPolicy: 'no-referrer' });
-      if (res.ok) {
-        const blob = await res.blob();
-        saveBlobLocally(blob, filename);
-        indicateSuccess(originalText);
-        return;
-      }
-    } catch (e1) {
-      console.warn('Direct blob fetch failed, trying proxy...', e1);
-    }
-
-    // 2. Attempt via fast CORS proxy to force same-origin Blob
-    try {
-      const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`;
-      const res = await fetch(proxyUrl, { referrerPolicy: 'no-referrer' });
-      if (res.ok) {
-        const blob = await res.blob();
-        saveBlobLocally(blob, filename);
-        indicateSuccess(originalText);
-        return;
-      }
-    } catch (e2) {
-      console.warn('CORS proxy fetch failed, executing direct download trigger...', e2);
-    }
-
-    // 3. Fallback direct anchor trigger (never opens modal)
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = filename;
-    a.target = '_self';
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-
-    indicateSuccess(originalText);
-  };
-
+  // --- Save File to Computer with Zero Delay ---
   const saveBlobLocally = (blob, filename) => {
     const blobUrl = window.URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -665,22 +790,37 @@ document.addEventListener('DOMContentLoaded', () => {
     setTimeout(() => window.URL.revokeObjectURL(blobUrl), 10000);
   };
 
-  const indicateSuccess = (originalHtml) => {
+  const triggerFileDownload = async (url, filename) => {
+    if (!url) return;
+
+    // Direct anchor click (browser native download)
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    a.target = '_self';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+
+    indicateSuccess();
+  };
+
+  const indicateSuccess = () => {
+    const originalText = directDownloadBtn.innerHTML;
     directDownloadBtn.innerHTML = `<i data-lucide="check-circle-2"></i> <span>Download Started!</span>`;
     if (window.lucide) window.lucide.createIcons();
     setTimeout(() => {
-      directDownloadBtn.disabled = false;
-      directDownloadBtn.innerHTML = originalHtml;
+      directDownloadBtn.innerHTML = originalText;
       if (window.lucide) window.lucide.createIcons();
-    }, 3500);
+    }, 3000);
   };
 
   const getSafeFilename = (title, ext = 'mp4') => {
     const clean = (title || 'video')
       .replace(/[^a-zA-Z0-9_\-\s]/g, '')
       .replace(/\s+/g, '_')
-      .slice(0, 50);
-    return `${clean}_nowatermark.${ext}`;
+      .slice(0, 45);
+    return `${clean || 'download'}_nowatermark.${ext}`;
   };
 
   // --- Error Handling ---
@@ -732,7 +872,7 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   const toggleCustomField = () => {
-    if (engineSelect.value === 'custom' || engineSelect.value === 'cobalt') {
+    if (engineSelect.value === 'custom') {
       customApiField.classList.remove('hidden');
     } else {
       customApiField.classList.add('hidden');
