@@ -1,0 +1,309 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>OmniDownloader - All-in-One Video Downloader</title>
+  <meta name="description" content="Free, open-source downloader for YouTube Shorts, Instagram Reels, Facebook Reels, Kuaishou, and TikTok without watermark in full quality.">
+  <link rel="icon" type="image/svg+xml" href="favicon.svg">
+  <!-- Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <!-- Lucide Icons -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <!-- Background Glow Effects -->
+  <div class="blob blob-1"></div>
+  <div class="blob blob-2"></div>
+  <div class="blob blob-3"></div>
+
+  <div class="page-container">
+    <!-- Header -->
+    <header class="navbar">
+      <div class="brand">
+        <div class="brand-icon">
+          <i data-lucide="sparkles"></i>
+        </div>
+        <span class="brand-title">Omni<span class="gradient-text">Downloader</span></span>
+      </div>
+
+      <div class="nav-actions">
+        <button id="themeToggle" class="icon-btn" title="Toggle theme">
+          <i data-lucide="moon" id="themeIcon"></i>
+        </button>
+        <button id="settingsBtn" class="icon-btn" title="Settings / API Config">
+          <i data-lucide="settings"></i>
+        </button>
+        <a href="https://github.com/aditya-Pratap15/All-in-one-platform-" target="_blank" rel="noopener" class="github-pill">
+          <i data-lucide="github"></i>
+          <span>GitHub</span>
+        </a>
+      </div>
+    </header>
+
+    <!-- Hero Section -->
+    <main class="main-content">
+      <div class="hero-section">
+        <div class="badge-pill">
+          <span class="pulsing-dot"></span>
+          <span>100% Free & Open Source • No Watermarks</span>
+        </div>
+        <h1 class="hero-title">
+          Download Any Short & Reel <br/>
+          in <span class="gradient-text">Full Original Quality</span>
+        </h1>
+        <p class="hero-subtitle">
+          Save YouTube Shorts, Instagram Reels, Facebook Reels, Kuaishou (快手), and TikTok clips directly in highest bitrate with zero watermark.
+        </p>
+
+        <!-- Supported Platforms Badges -->
+        <div class="platform-tags">
+          <span class="platform-tag" data-platform="youtube">
+            <i data-lucide="play-circle"></i> YouTube Shorts
+          </span>
+          <span class="platform-tag" data-platform="instagram">
+            <i data-lucide="instagram"></i> Instagram Reels
+          </span>
+          <span class="platform-tag" data-platform="facebook">
+            <i data-lucide="facebook"></i> Facebook Reels
+          </span>
+          <span class="platform-tag" data-platform="kuaishou">
+            <i data-lucide="video"></i> Kuaishou / Kwai
+          </span>
+          <span class="platform-tag" data-platform="tiktok">
+            <i data-lucide="music-2"></i> TikTok
+          </span>
+        </div>
+      </div>
+
+      <!-- Downloader Form Card -->
+      <div class="downloader-card">
+        <div class="input-group-container">
+          <div class="input-wrapper">
+            <div class="input-prefix" id="detectedPlatformIcon">
+              <i data-lucide="link-2"></i>
+            </div>
+            <input 
+              type="url" 
+              id="videoUrlInput" 
+              placeholder="Paste video link here (e.g. YouTube Shorts, Instagram, Kuaishou...)" 
+              autocomplete="off"
+              spellcheck="false"
+            />
+            <button type="button" class="inline-btn" id="pasteBtn" title="Paste from clipboard">
+              <i data-lucide="clipboard"></i>
+              <span>Paste</span>
+            </button>
+            <button type="button" class="inline-btn hidden" id="clearBtn" title="Clear input">
+              <i data-lucide="x"></i>
+            </button>
+          </div>
+
+          <div class="action-controls">
+            <div class="select-wrapper">
+              <label for="qualitySelect"><i data-lucide="sliders"></i> Quality:</label>
+              <select id="qualitySelect">
+                <option value="max">Best Available (Max / 4K / 1080p)</option>
+                <option value="1080">1080p Full HD</option>
+                <option value="720">720p HD</option>
+                <option value="audio">Audio Only (MP3)</option>
+              </select>
+            </div>
+
+            <button type="button" id="downloadBtn" class="download-action-btn">
+              <i data-lucide="download"></i>
+              <span>Fetch Video</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Detected Platform Banner -->
+        <div id="detectionNotice" class="detection-notice hidden">
+          <i data-lucide="check-circle-2"></i>
+          <span id="detectionText">Detected: YouTube Shorts</span>
+        </div>
+
+        <!-- Loading State -->
+        <div id="loadingState" class="state-container hidden">
+          <div class="spinner"></div>
+          <p id="loadingStatusText">Analyzing video stream...</p>
+          <span class="loading-subtext">Connecting to extraction servers to bypass watermarks</span>
+        </div>
+
+        <!-- Error State -->
+        <div id="errorState" class="state-container error-box hidden">
+          <div class="error-header">
+            <i data-lucide="alert-circle"></i>
+            <span id="errorMessage">Unable to fetch video. Please check the URL.</span>
+          </div>
+          <div class="error-actions" id="errorActions">
+            <!-- Dynamic fallback suggestions -->
+          </div>
+        </div>
+
+        <!-- Result Card -->
+        <div id="resultCard" class="result-card hidden">
+          <div class="result-grid">
+            <div class="video-preview-col">
+              <div class="media-container" id="mediaContainer">
+                <img id="videoThumbnail" class="video-thumbnail" src="" alt="Thumbnail" />
+                <video id="videoPlayer" class="video-player hidden" controls playsinline></video>
+                <button id="playPreviewBtn" class="play-preview-btn">
+                  <i data-lucide="play"></i>
+                </button>
+              </div>
+            </div>
+
+            <div class="video-info-col">
+              <div class="video-meta-header">
+                <span class="platform-badge" id="resultPlatformBadge">
+                  <i data-lucide="film"></i>
+                  <span id="resultPlatformText">Video</span>
+                </span>
+                <span class="duration-badge" id="durationBadge">00:00</span>
+              </div>
+
+              <h3 id="videoTitle" class="video-title">Title Loading...</h3>
+              <p id="videoAuthor" class="video-author">By Creator</p>
+
+              <!-- Formats / Download Options -->
+              <div class="download-formats-list" id="downloadFormatsList">
+                <!-- Dynamically populated download options -->
+              </div>
+
+              <div class="result-actions">
+                <button type="button" id="directDownloadBtn" class="primary-download-btn">
+                  <i data-lucide="download"></i>
+                  <span>Download MP4 (Original No-Watermark)</span>
+                </button>
+                <button type="button" id="copyLinkBtn" class="secondary-btn">
+                  <i data-lucide="copy"></i>
+                  <span>Copy Stream Link</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Feature Grid -->
+      <section class="features-section">
+        <div class="feature-card">
+          <div class="feature-icon"><i data-lucide="shield-check"></i></div>
+          <h3>Zero Watermark</h3>
+          <p>Extracts the clean raw stream directly from video CDNs before in-app watermarks are added.</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon"><i data-lucide="zap"></i></div>
+          <h3>Full Resolution</h3>
+          <p>Preserves original source bitrate and resolution up to 1080p, 2K, and 4K 60fps.</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon"><i data-lucide="code-2"></i></div>
+          <h3>100% Free Forever</h3>
+          <p>Open source without subscription, daily limits, or intrusive full-screen popups.</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon"><i data-lucide="globe"></i></div>
+          <h3>Multi-Platform</h3>
+          <p>Works across YouTube Shorts, Instagram Reels, Facebook Reels, Kuaishou, and TikTok.</p>
+        </div>
+      </section>
+
+      <!-- Platform Guide & FAQ Section -->
+      <section class="faq-section">
+        <h2>Frequently Asked Questions & Tips</h2>
+        <div class="faq-accordion">
+          <details class="faq-item">
+            <summary>
+              <span>How do I download YouTube Shorts & Facebook Reels?</span>
+              <i data-lucide="chevron-down"></i>
+            </summary>
+            <div class="faq-content">
+              <p>Just click the Share button on any YouTube Short or Facebook Reel, copy the link, paste it into the box above, and click <strong>Fetch Video</strong>. The full resolution MP4 file without watermarks will be generated instantly.</p>
+            </div>
+          </details>
+
+          <details class="faq-item">
+            <summary>
+              <span>How do I download Instagram Reels?</span>
+              <i data-lucide="chevron-down"></i>
+            </summary>
+            <div class="faq-content">
+              <p>Ensure the Instagram Reel is from a <strong>public</strong> profile. Paste the link (e.g., <code>https://www.instagram.com/reel/XYZ...</code>) and click Fetch. For private accounts, Instagram blocks guest API access.</p>
+            </div>
+          </details>
+
+          <details class="faq-item">
+            <summary>
+              <span>How do I download Kuaishou (快手 / Kwai) videos?</span>
+              <i data-lucide="chevron-down"></i>
+            </summary>
+            <div class="faq-content">
+              <p>Paste either the <code>kuaishou.com</code> web URL or the mobile share link (<code>v.kuaishou.com/...</code> or <code>kwai.com/...</code>). Our multi-engine resolver parses the redirect and pulls the raw CDN <code>.mp4</code> file without platform branding.</p>
+            </div>
+          </details>
+
+          <details class="faq-item">
+            <summary>
+              <span>Can I run a local high-performance engine?</span>
+              <i data-lucide="chevron-down"></i>
+            </summary>
+            <div class="faq-content">
+              <p>Yes! In the top-right Settings menu (<i data-lucide="settings" style="width:14px;height:14px;vertical-align:middle;"></i>), you can connect your own custom Cobalt instance or local <code>yt-dlp</code> backend to get unlimited unrestricted speed forever.</p>
+            </div>
+          </details>
+        </div>
+      </section>
+    </main>
+
+    <!-- Settings Modal -->
+    <div id="settingsModal" class="modal-backdrop hidden">
+      <div class="modal-card">
+        <div class="modal-header">
+          <h3><i data-lucide="settings"></i> Downloader Settings</h3>
+          <button id="closeSettingsBtn" class="icon-btn"><i data-lucide="x"></i></button>
+        </div>
+        <div class="modal-body">
+          <div class="setting-item">
+            <label for="engineSelect"><strong>Extraction Engine Mode</strong></label>
+            <select id="engineSelect" class="styled-select">
+              <option value="auto">Auto / Multi-Engine Fallback (Recommended)</option>
+              <option value="cobalt">Cobalt Public Network</option>
+              <option value="custom">Custom Backend / Local yt-dlp API</option>
+            </select>
+            <span class="setting-help">Auto will seamlessly try public engines to find the best available video stream.</span>
+          </div>
+
+          <div class="setting-item hidden" id="customApiField">
+            <label for="customApiUrl"><strong>Custom Backend / Cobalt Instance URL:</strong></label>
+            <input type="url" id="customApiUrl" placeholder="https://your-custom-cobalt-instance.com or http://localhost:8000" class="styled-input" />
+            <span class="setting-help">Enter your self-hosted Cobalt instance or local yt-dlp API server.</span>
+          </div>
+
+          <div class="setting-item">
+            <label class="checkbox-label">
+              <input type="checkbox" id="autoPreviewCheck" checked>
+              <span>Auto-load video preview in browser before downloading</span>
+            </label>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" id="saveSettingsBtn" class="download-action-btn">Save Changes</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Footer -->
+    <footer class="footer">
+      <p>OmniDownloader • Free and Open Source Media Tool</p>
+      <p class="disclaimer">For personal archival and educational use. Respect creators' intellectual property.</p>
+    </footer>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
