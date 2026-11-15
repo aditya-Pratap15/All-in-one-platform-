@@ -28,7 +28,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const resultCard = document.getElementById('resultCard');
   const videoThumbnail = document.getElementById('videoThumbnail');
   const videoPlayer = document.getElementById('videoPlayer');
-  const playPreviewBtn = document.getElementById('playPreviewBtn');
+  const previewFallbackNotice = document.getElementById('previewFallbackNotice');
   const resultPlatformBadge = document.getElementById('resultPlatformBadge');
   const resultPlatformText = document.getElementById('resultPlatformText');
   const durationBadge = document.getElementById('durationBadge');
@@ -38,9 +38,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const directDownloadBtn = document.getElementById('directDownloadBtn');
   const copyLinkBtn = document.getElementById('copyLinkBtn');
 
-  // Theme & Settings
-  const themeToggle = document.getElementById('themeToggle');
-  const themeIcon = document.getElementById('themeIcon');
+  // Modals
   const settingsBtn = document.getElementById('settingsBtn');
   const settingsModal = document.getElementById('settingsModal');
   const closeSettingsBtn = document.getElementById('closeSettingsBtn');
@@ -49,6 +47,15 @@ document.addEventListener('DOMContentLoaded', () => {
   const customApiField = document.getElementById('customApiField');
   const customApiUrl = document.getElementById('customApiUrl');
   const autoPreviewCheck = document.getElementById('autoPreviewCheck');
+
+  const downloadModal = document.getElementById('downloadModal');
+  const downloadModalBody = document.getElementById('downloadModalBody');
+  const closeDownloadModalBtn = document.getElementById('closeDownloadModalBtn');
+  const closeDownloadBtn = document.getElementById('closeDownloadBtn');
+
+  // Theme
+  const themeToggle = document.getElementById('themeToggle');
+  const themeIcon = document.getElementById('themeIcon');
 
   // State
   let currentVideoData = null;
@@ -162,7 +169,7 @@ document.addEventListener('DOMContentLoaded', () => {
         fetchVideo();
       }
     } catch (err) {
-      alert('Unable to access clipboard. Please paste the link manually into the box.');
+      alert('Unable to access clipboard. Please paste the link manually into the input box.');
     }
   });
 
@@ -176,6 +183,17 @@ document.addEventListener('DOMContentLoaded', () => {
     fetchVideo();
   });
 
+  // --- Helpers ---
+  const isDirectMediaUrl = (url) => {
+    if (!url || typeof url !== 'string') return false;
+    // Discard webpage URLs that don't point to an actual media stream
+    if (url.includes('youtube.com/watch') || url.includes('youtube.com/shorts') ||
+        url.includes('instagram.com/reel') || url.includes('facebook.com/reel')) {
+      return false;
+    }
+    return true;
+  };
+
   // --- API Extraction Engines ---
 
   /**
@@ -188,31 +206,41 @@ document.addEventListener('DOMContentLoaded', () => {
     const data = await res.json();
     
     if (!data || data.error || (data.success === false)) {
-      throw new Error(data.message || 'Extractor was unable to parse this URL');
+      throw new Error(data.message || 'Unable to parse this video link');
     }
 
     const inner = data.data || data;
-    const formats = inner.downloads || inner.formats || [];
+    const rawFormats = inner.downloads || inner.formats || [];
     
-    // Sort or locate best mp4 stream
-    let bestUrl = inner.source || '';
-    if (formats.length > 0) {
-      // Find highest resolution or first mp4
-      const videoFormats = formats.filter(f => f.ext === 'mp4' || f.format_id?.includes('p') || f.url);
-      if (videoFormats.length > 0) {
-        bestUrl = videoFormats[0].url || videoFormats[0].download_url;
-      }
+    // Filter down to valid media streams
+    const validFormats = rawFormats.filter(f => {
+      const link = f.url || f.download_url;
+      return link && isDirectMediaUrl(link);
+    });
+
+    // Check if we found direct streams
+    let bestUrl = '';
+    if (validFormats.length > 0) {
+      // Prefer highest resolution mp4
+      const mp4Formats = validFormats.filter(f => f.ext === 'mp4' || f.format_id?.includes('p'));
+      bestUrl = (mp4Formats[0] || validFormats[0]).url || (mp4Formats[0] || validFormats[0]).download_url;
+    } else if (isDirectMediaUrl(inner.source)) {
+      bestUrl = inner.source;
+    }
+
+    if (!bestUrl) {
+      throw new Error('No direct video stream could be extracted from this URL.');
     }
 
     return {
       title: inner.title || 'Extracted Video',
       author: inner.channel || inner.author || inner.uploader || 'Creator',
       thumbnail: inner.thumbnail || inner.picture || '',
-      duration: inner.duration || 'Short',
+      duration: inner.duration || 'Full Quality',
       sourceUrl: url,
       directUrl: bestUrl,
-      formats: formats.map(f => ({
-        label: f.format_id || f.quality || (f.ext === 'mp3' ? 'Audio MP3' : 'MP4 HD'),
+      formats: validFormats.map(f => ({
+        label: f.format_id || f.quality || (f.ext === 'mp3' ? 'Audio MP3' : 'MP4 Video'),
         ext: f.ext || 'mp4',
         size: f.size || f.filesize_str || 'Full Quality',
         url: f.url || f.download_url
@@ -246,10 +274,12 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     const directUrl = data.url || (data.picker && data.picker[0]?.url);
-    if (!directUrl) throw new Error('No stream URL was returned by Cobalt');
+    if (!directUrl || !isDirectMediaUrl(directUrl)) {
+      throw new Error('No stream URL was returned by Cobalt');
+    }
 
     return {
-      title: 'Extracted Short / Reel',
+      title: 'Extracted Video',
       author: 'Creator',
       thumbnail: '',
       duration: 'HD',
@@ -268,13 +298,16 @@ document.addEventListener('DOMContentLoaded', () => {
    * Tertiary Engine: Local or Custom Self-Hosted yt-dlp micro-backend
    */
   const extractWithCustom = async (url, customEndpoint) => {
-    if (!customEndpoint) throw new Error('Please enter your custom backend or Cobalt URL in Settings');
+    if (!customEndpoint) throw new Error('Please enter your custom backend URL in Settings');
     const endpoint = customEndpoint.replace(/\/+$/, '');
     
-    // Check if endpoint is custom yt-dlp API
     const res = await fetch(`${endpoint}/download?url=${encodeURIComponent(url)}`, { method: 'GET' });
-    if (!res.ok) throw new Error(`Custom API returned status ${res.status}`);
+    if (!res.ok) throw new Error(`Custom backend returned HTTP ${res.status}`);
     const data = await res.json();
+
+    if (!data.url || !isDirectMediaUrl(data.url)) {
+      throw new Error('Custom backend did not return a playable video stream URL');
+    }
 
     return {
       title: data.title || 'Video',
@@ -300,7 +333,6 @@ document.addEventListener('DOMContentLoaded', () => {
       return;
     }
 
-    // UI State: Loading
     hideStates();
     loadingState.classList.remove('hidden');
     loadingStatusText.textContent = 'Resolving media stream...';
@@ -308,44 +340,30 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const detected = detectPlatform(rawUrl);
     let result = null;
-    let errors = [];
 
     try {
-      // If user selected Custom in settings
       if (activeEngine === 'custom') {
         loadingStatusText.textContent = 'Contacting custom backend...';
         result = await extractWithCustom(rawUrl, customApi);
-      } 
-      // If user selected Cobalt
-      else if (activeEngine === 'cobalt') {
+      } else if (activeEngine === 'cobalt') {
         loadingStatusText.textContent = 'Fetching from Cobalt network...';
         result = await extractWithCobalt(rawUrl, customApi);
-      } 
-      // Auto / Multi-Engine Fallback Mode
-      else {
-        // Attempt Primary Engine
+      } else {
+        // Auto mode
         try {
           loadingStatusText.textContent = 'Extracting original video without watermark...';
           result = await extractWithVkr(rawUrl);
         } catch (err1) {
           console.warn('Primary engine failed:', err1);
-          errors.push(err1.message);
-
-          // Attempt Secondary Fallback Engine
-          try {
-            loadingStatusText.textContent = 'Trying secondary fallback engine...';
-            result = await extractWithCobalt(rawUrl);
-          } catch (err2) {
-            console.warn('Secondary engine failed:', err2);
-            errors.push(err2.message);
-          }
+          loadingStatusText.textContent = 'Trying secondary fallback engine...';
+          result = await extractWithCobalt(rawUrl);
         }
       }
 
       if (result && result.directUrl) {
         displayResult(result, detected);
       } else {
-        throw new Error('Video extraction servers are temporarily busy or the link is private.');
+        throw new Error('Could not find a downloadable video stream for this link.');
       }
     } catch (err) {
       console.error(err);
@@ -362,30 +380,37 @@ document.addEventListener('DOMContentLoaded', () => {
     hideStates();
     resultCard.classList.remove('hidden');
 
-    // Meta details
+    // Metadata
     videoTitle.textContent = data.title || 'Shorts / Reel Video';
     videoAuthor.textContent = `Uploaded by: ${data.author || 'Creator'}`;
     durationBadge.textContent = data.duration || 'Full Quality';
     resultPlatformText.textContent = platform ? platform.name : 'Video';
 
-    // Media Preview
+    // Video Player & Preview Setup
+    videoPlayer.classList.remove('hidden');
+    videoThumbnail.classList.add('hidden');
+    previewFallbackNotice.classList.add('hidden');
+
     if (data.thumbnail) {
+      videoPlayer.poster = data.thumbnail;
       videoThumbnail.src = data.thumbnail;
-      videoThumbnail.classList.remove('hidden');
     } else {
-      videoThumbnail.classList.add('hidden');
+      videoPlayer.removeAttribute('poster');
     }
 
-    videoPlayer.pause();
-    videoPlayer.classList.add('hidden');
-    playPreviewBtn.classList.remove('hidden');
+    // Set the direct video stream source
+    videoPlayer.src = data.directUrl;
+    videoPlayer.load();
 
-    if (autoPreview && data.directUrl) {
-      videoPlayer.src = data.directUrl;
-      videoPlayer.classList.remove('hidden');
-      videoThumbnail.classList.add('hidden');
-      playPreviewBtn.classList.add('hidden');
-    }
+    // Fallback if in-browser playback is restricted by CDN CORS
+    videoPlayer.onerror = () => {
+      console.warn('Browser video element was blocked from streaming this CDN URL');
+      videoPlayer.classList.add('hidden');
+      if (data.thumbnail) {
+        videoThumbnail.classList.remove('hidden');
+      }
+      previewFallbackNotice.classList.remove('hidden');
+    };
 
     // Populate format list
     downloadFormatsList.innerHTML = '';
@@ -415,13 +440,13 @@ document.addEventListener('DOMContentLoaded', () => {
         e.preventDefault();
         const url = btn.getAttribute('data-url');
         const filename = btn.getAttribute('data-name');
-        triggerFileDownload(url, filename);
+        triggerFileDownload(url, filename, btn);
       });
     });
 
     // Primary download button
     directDownloadBtn.onclick = () => {
-      triggerFileDownload(data.directUrl, getSafeFilename(data.title, 'mp4'));
+      triggerFileDownload(data.directUrl, getSafeFilename(data.title, 'mp4'), directDownloadBtn);
     };
 
     // Copy direct link button
@@ -438,52 +463,100 @@ document.addEventListener('DOMContentLoaded', () => {
     };
 
     if (window.lucide) window.lucide.createIcons();
-
-    // Scroll smoothly to result
     resultCard.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   };
 
-  playPreviewBtn?.addEventListener('click', () => {
-    if (!currentVideoData?.directUrl) return;
-    videoPlayer.src = currentVideoData.directUrl;
-    videoPlayer.classList.remove('hidden');
-    videoThumbnail.classList.add('hidden');
-    playPreviewBtn.classList.add('hidden');
-    videoPlayer.play().catch(e => console.warn('Autoplay blocked:', e));
-  });
-
-  // --- Download Trigger ---
-  const triggerFileDownload = async (url, filename) => {
+  // --- Forced Direct Download Function ---
+  const triggerFileDownload = async (url, filename, targetBtn = null) => {
     if (!url) return;
 
-    try {
-      // Attempt blob download to force save file dialog directly
-      const response = await fetch(url, { mode: 'cors' });
-      if (response.ok) {
-        const blob = await response.blob();
-        const blobUrl = window.URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = blobUrl;
-        a.download = filename;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        window.URL.revokeObjectURL(blobUrl);
-        return;
-      }
-    } catch (e) {
-      console.warn('CORS blob download prevented, falling back to direct navigation download:', e);
+    const originalBtnHtml = targetBtn ? targetBtn.innerHTML : null;
+    if (targetBtn) {
+      targetBtn.disabled = true;
+      targetBtn.innerHTML = `<div class="btn-spinner"></div> <span>Downloading to device...</span>`;
     }
 
-    // Direct link fallback
+    try {
+      // Step 1: Attempt direct fetch to convert to Blob (works when CDN allows CORS)
+      const res = await fetch(url, { referrerPolicy: 'no-referrer' });
+      if (res.ok) {
+        const blob = await res.blob();
+        saveBlobLocally(blob, filename);
+        indicateSuccess(targetBtn, originalBtnHtml);
+        return;
+      }
+    } catch (e1) {
+      console.warn('Direct fetch failed due to CORS. Attempting CORS proxy...', e1);
+    }
+
+    // Step 2: Attempt via fast CORS proxy to force same-origin Blob
+    try {
+      const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`;
+      const res = await fetch(proxyUrl, { referrerPolicy: 'no-referrer' });
+      if (res.ok) {
+        const blob = await res.blob();
+        saveBlobLocally(blob, filename);
+        indicateSuccess(targetBtn, originalBtnHtml);
+        return;
+      }
+    } catch (e2) {
+      console.warn('CORS proxy fetch failed:', e2);
+    }
+
+    // Reset button
+    if (targetBtn && originalBtnHtml) {
+      targetBtn.disabled = false;
+      targetBtn.innerHTML = originalBtnHtml;
+      if (window.lucide) window.lucide.createIcons();
+    }
+
+    // Step 3: If in-memory download is blocked by CDN security, show clean Download Guide Modal
+    // instead of dumping the user into a new tab without instructions
+    showDownloadGuideModal(url, filename);
+  };
+
+  const saveBlobLocally = (blob, filename) => {
+    const blobUrl = window.URL.createObjectURL(blob);
     const a = document.createElement('a');
-    a.href = url;
+    a.href = blobUrl;
     a.download = filename;
-    a.target = '_blank';
-    a.rel = 'noopener noreferrer';
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
+    setTimeout(() => window.URL.revokeObjectURL(blobUrl), 10000);
+  };
+
+  const indicateSuccess = (btn, originalHtml) => {
+    if (!btn) return;
+    btn.innerHTML = `<i data-lucide="check-circle-2"></i> <span>Saved to Downloads!</span>`;
+    if (window.lucide) window.lucide.createIcons();
+    setTimeout(() => {
+      btn.disabled = false;
+      btn.innerHTML = originalHtml;
+      if (window.lucide) window.lucide.createIcons();
+    }, 3000);
+  };
+
+  const showDownloadGuideModal = (url, filename) => {
+    downloadModalBody.innerHTML = `
+      <div class="download-guide-box">
+        <span class="guide-badge"><i data-lucide="shield-check"></i> Direct Stream Extracted</span>
+        <p>Because social platforms (Instagram / YouTube) restrict silent browser downloads from external websites, your browser requires a 1-click direct save:</p>
+        <div class="step-list">
+          <div class="step-item">
+            <strong>Desktop:</strong> Click <em>"Open Video Stream"</em> below, then press <strong>Ctrl + S</strong> (or right-click the video & select <em>"Save video as..."</em>).
+          </div>
+          <div class="step-item">
+            <strong>Mobile (Android / iPhone):</strong> On the video player above, tap the <strong>3 vertical dots (⋮)</strong> and tap <strong>Download</strong>.
+          </div>
+        </div>
+        <a href="${url}" target="_blank" rel="noreferrer" download="${filename}" class="download-action-btn" style="text-decoration: none; margin-top: 10px; width: 100%;">
+          <i data-lucide="external-link"></i> Open Video Stream
+        </a>
+      </div>
+    `;
+    downloadModal.classList.remove('hidden');
+    if (window.lucide) window.lucide.createIcons();
   };
 
   const getSafeFilename = (title, ext = 'mp4') => {
@@ -494,7 +567,7 @@ document.addEventListener('DOMContentLoaded', () => {
     return `${clean}_nowatermark.${ext}`;
   };
 
-  // --- Error Handling & Fallbacks ---
+  // --- Error Handling ---
   const showError = (msg, url = '', platform = null) => {
     hideStates();
     errorState.classList.remove('hidden');
@@ -513,8 +586,8 @@ document.addEventListener('DOMContentLoaded', () => {
       tipsNotice.className = 'setting-help';
       tipsNotice.style.marginTop = '8px';
       tipsNotice.textContent = platform?.key === 'instagram' 
-        ? 'Tip: If this is an Instagram Reel, confirm the account is public.'
-        : 'Tip: You can configure a custom Cobalt or local yt-dlp instance in Settings for unlimited downloads.';
+        ? 'Tip: Ensure the Instagram Reel is from a public account.'
+        : 'Tip: You can run our local Python backend (server.py) for 100% unrestricted private downloads.';
       errorActions.appendChild(tipsNotice);
     }
 
@@ -527,7 +600,7 @@ document.addEventListener('DOMContentLoaded', () => {
     resultCard.classList.add('hidden');
   };
 
-  // --- Settings Modal Handlers ---
+  // --- Modals Management ---
   settingsBtn?.addEventListener('click', () => {
     engineSelect.value = activeEngine;
     customApiUrl.value = customApi;
@@ -536,13 +609,17 @@ document.addEventListener('DOMContentLoaded', () => {
     settingsModal.classList.remove('hidden');
   });
 
-  const closeModal = () => {
-    settingsModal.classList.add('hidden');
-  };
-
-  closeSettingsBtn?.addEventListener('click', closeModal);
+  const closeSettings = () => settingsModal.classList.add('hidden');
+  closeSettingsBtn?.addEventListener('click', closeSettings);
   settingsModal?.addEventListener('click', (e) => {
-    if (e.target === settingsModal) closeModal();
+    if (e.target === settingsModal) closeSettings();
+  });
+
+  const closeDownload = () => downloadModal.classList.add('hidden');
+  closeDownloadModalBtn?.addEventListener('click', closeDownload);
+  closeDownloadBtn?.addEventListener('click', closeDownload);
+  downloadModal?.addEventListener('click', (e) => {
+    if (e.target === downloadModal) closeDownload();
   });
 
   const toggleCustomField = () => {
@@ -564,7 +641,7 @@ document.addEventListener('DOMContentLoaded', () => {
     localStorage.setItem('omni_custom_api', customApi);
     localStorage.setItem('omni_auto_preview', autoPreview);
 
-    closeModal();
+    closeSettings();
     alert('Settings saved successfully!');
   });
 });

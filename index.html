@@ -3,6 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="referrer" content="no-referrer">
   <title>OmniDownloader - All-in-One Video Downloader</title>
   <meta name="description" content="Free, open-source downloader for YouTube Shorts, Instagram Reels, Facebook Reels, Kuaishou, and TikTok without watermark in full quality.">
   <link rel="icon" type="image/svg+xml" href="favicon.svg">
@@ -149,11 +150,13 @@
           <div class="result-grid">
             <div class="video-preview-col">
               <div class="media-container" id="mediaContainer">
-                <img id="videoThumbnail" class="video-thumbnail" src="" alt="Thumbnail" />
-                <video id="videoPlayer" class="video-player hidden" controls playsinline></video>
-                <button id="playPreviewBtn" class="play-preview-btn">
-                  <i data-lucide="play"></i>
-                </button>
+                <video id="videoPlayer" class="video-player" controls playsinline preload="metadata" referrerpolicy="no-referrer"></video>
+                <img id="videoThumbnail" class="video-thumbnail hidden" alt="Thumbnail" referrerpolicy="no-referrer" />
+                <div id="previewFallbackNotice" class="preview-fallback-notice hidden">
+                  <i data-lucide="video-off"></i>
+                  <span>Streaming preview restricted by host CDN</span>
+                  <p>Your clean video is ready to download! Use the buttons on the right.</p>
+                </div>
               </div>
             </div>
 
@@ -259,6 +262,22 @@
         </div>
       </section>
     </main>
+
+    <!-- Download Helper Modal -->
+    <div id="downloadModal" class="modal-backdrop hidden">
+      <div class="modal-card">
+        <div class="modal-header">
+          <h3><i data-lucide="download-cloud"></i> Saving Video File</h3>
+          <button id="closeDownloadModalBtn" class="icon-btn"><i data-lucide="x"></i></button>
+        </div>
+        <div class="modal-body" id="downloadModalBody">
+          <!-- Dynamic content -->
+        </div>
+        <div class="modal-footer" id="downloadModalFooter">
+          <button type="button" id="closeDownloadBtn" class="secondary-btn">Close</button>
+        </div>
+      </div>
+    </div>
 
     <!-- Settings Modal -->
     <div id="settingsModal" class="modal-backdrop hidden">

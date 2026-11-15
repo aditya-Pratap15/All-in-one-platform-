@@ -863,6 +863,79 @@ body {
   margin-top: 6px;
 }
 
+.preview-fallback-notice {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background: rgba(10, 13, 20, 0.88);
+  padding: 20px;
+  text-align: center;
+  color: var(--text-primary);
+  gap: 8px;
+}
+
+.preview-fallback-notice i {
+  width: 36px;
+  height: 36px;
+  color: var(--warning);
+}
+
+.preview-fallback-notice span {
+  font-weight: 700;
+  font-size: 0.95rem;
+}
+
+.preview-fallback-notice p {
+  font-size: 0.82rem;
+  color: var(--text-secondary);
+}
+
+.btn-spinner {
+  width: 18px;
+  height: 18px;
+  border: 2.5px solid rgba(255, 255, 255, 0.3);
+  border-top-color: white;
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+}
+
+.download-guide-box {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.guide-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(16, 185, 129, 0.15);
+  color: var(--success);
+  padding: 4px 10px;
+  border-radius: 20px;
+  font-size: 0.82rem;
+  font-weight: 700;
+  width: fit-content;
+}
+
+.step-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  background: var(--bg-input);
+  border: 1px solid var(--bg-card-border);
+  padding: 14px;
+  border-radius: var(--radius-sm);
+  font-size: 0.9rem;
+}
+
+.step-item strong {
+  color: var(--accent-primary);
+}
+
 /* Utilities */
 .hidden {
   display: none !important;
