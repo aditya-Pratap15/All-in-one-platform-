@@ -13,6 +13,8 @@
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <!-- Lucide Icons -->
   <script src="https://unpkg.com/lucide@latest"></script>
+  <!-- JSZip for Client-Side Batch Zip Download -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -82,7 +84,21 @@
 
       <!-- Downloader Form Card -->
       <div class="downloader-card">
-        <div class="input-group-container">
+        <!-- Mode Tabs -->
+        <div class="mode-tabs">
+          <button type="button" class="mode-tab active" id="singleModeTab">
+            <i data-lucide="play-circle"></i>
+            <span>Single Video</span>
+          </button>
+          <button type="button" class="mode-tab" id="batchModeTab">
+            <i data-lucide="layers"></i>
+            <span>Batch Download</span>
+            <span class="tab-badge">Multi</span>
+          </button>
+        </div>
+
+        <!-- Single Video Input Section -->
+        <div id="singleInputContainer" class="input-group-container">
           <div class="input-wrapper">
             <div class="input-prefix" id="detectedPlatformIcon">
               <i data-lucide="link-2"></i>
@@ -121,6 +137,56 @@
           </div>
         </div>
 
+        <!-- Batch Download Input Section -->
+        <div id="batchInputContainer" class="batch-input-container hidden">
+          <div class="batch-toolbar">
+            <div class="batch-counter">
+              <i data-lucide="list-checks"></i>
+              <span id="batchCountBadge">0 links detected</span>
+            </div>
+            <div class="batch-quick-actions">
+              <button type="button" class="inline-btn" id="batchPasteBtn" title="Paste links from clipboard">
+                <i data-lucide="clipboard"></i>
+                <span>Paste Links</span>
+              </button>
+              <button type="button" class="inline-btn" id="batchSampleBtn" title="Insert demo links for testing">
+                <i data-lucide="sparkles"></i>
+                <span>Demo Links</span>
+              </button>
+              <button type="button" class="inline-btn" id="batchClearBtn" title="Clear batch text">
+                <i data-lucide="trash-2"></i>
+                <span>Clear</span>
+              </button>
+            </div>
+          </div>
+
+          <div class="textarea-wrapper">
+            <textarea 
+              id="batchUrlsInput" 
+              class="styled-textarea" 
+              rows="6" 
+              placeholder="Paste multiple video URLs here (one URL per line)&#10;Supports YouTube Shorts, Instagram Reels, Facebook Reels, Kuaishou, and TikTok:&#10;&#10;https://youtube.com/shorts/...&#10;https://www.facebook.com/share/r/...&#10;https://v.kuaishou.com/..."
+              spellcheck="false"
+            ></textarea>
+          </div>
+
+          <div class="action-controls">
+            <div class="select-wrapper">
+              <label for="batchQualitySelect"><i data-lucide="sliders"></i> Quality:</label>
+              <select id="batchQualitySelect">
+                <option value="max">Best Available (Max / 4K / 1080p)</option>
+                <option value="1080">1080p Full HD</option>
+                <option value="720">720p HD</option>
+              </select>
+            </div>
+
+            <button type="button" id="batchFetchBtn" class="download-action-btn">
+              <i data-lucide="download-cloud"></i>
+              <span>Fetch All Videos</span>
+            </button>
+          </div>
+        </div>
+
         <!-- Detected Platform Banner -->
         <div id="detectionNotice" class="detection-notice hidden">
           <i data-lucide="check-circle-2"></i>
@@ -145,7 +211,7 @@
           </div>
         </div>
 
-        <!-- Result Card -->
+        <!-- Single Video Result Card -->
         <div id="resultCard" class="result-card hidden">
           <div class="result-grid">
             <div class="video-preview-col">
@@ -195,6 +261,40 @@
                 </div>
               </div>
             </div>
+          </div>
+        </div>
+
+        <!-- Batch Download Results Section -->
+        <div id="batchResultCard" class="batch-result-card hidden">
+          <div class="batch-results-header">
+            <div class="batch-header-info">
+              <h3 class="batch-title">
+                <i data-lucide="package-check"></i>
+                <span id="batchProgressTitle">Batch Queue (0/0 Completed)</span>
+              </h3>
+              <p class="batch-subtitle" id="batchProgressSubtext">Extracting full resolution videos without watermark...</p>
+            </div>
+            
+            <div class="batch-master-actions">
+              <button type="button" id="batchDownloadZipBtn" class="download-action-btn pulse-glow" disabled>
+                <i data-lucide="archive"></i>
+                <span>Download All as ZIP (.zip)</span>
+              </button>
+              <button type="button" id="batchDownloadSeqBtn" class="secondary-btn" disabled>
+                <i data-lucide="download"></i>
+                <span>Download Sequentially</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- Progress Bar -->
+          <div class="batch-progress-bar-container">
+            <div class="batch-progress-bar" id="batchProgressBar" style="width: 0%;"></div>
+          </div>
+
+          <!-- Queue Items List -->
+          <div class="batch-queue-list" id="batchQueueList">
+            <!-- Dynamically injected queue items -->
           </div>
         </div>
       </div>

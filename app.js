@@ -42,6 +42,29 @@ document.addEventListener('DOMContentLoaded', () => {
   const downloadBtnText = document.getElementById('downloadBtnText');
   const copyLinkBtn = document.getElementById('copyLinkBtn');
 
+  // Mode Tabs & Containers
+  const singleModeTab = document.getElementById('singleModeTab');
+  const batchModeTab = document.getElementById('batchModeTab');
+  const singleInputContainer = document.getElementById('singleInputContainer');
+  const batchInputContainer = document.getElementById('batchInputContainer');
+
+  // Batch Mode Elements
+  const batchUrlsInput = document.getElementById('batchUrlsInput');
+  const batchCountBadge = document.getElementById('batchCountBadge');
+  const batchPasteBtn = document.getElementById('batchPasteBtn');
+  const batchSampleBtn = document.getElementById('batchSampleBtn');
+  const batchClearBtn = document.getElementById('batchClearBtn');
+  const batchQualitySelect = document.getElementById('batchQualitySelect');
+  const batchFetchBtn = document.getElementById('batchFetchBtn');
+
+  const batchResultCard = document.getElementById('batchResultCard');
+  const batchProgressTitle = document.getElementById('batchProgressTitle');
+  const batchProgressSubtext = document.getElementById('batchProgressSubtext');
+  const batchProgressBar = document.getElementById('batchProgressBar');
+  const batchQueueList = document.getElementById('batchQueueList');
+  const batchDownloadZipBtn = document.getElementById('batchDownloadZipBtn');
+  const batchDownloadSeqBtn = document.getElementById('batchDownloadSeqBtn');
+
   // Modals & Settings
   const settingsBtn = document.getElementById('settingsBtn');
   const settingsModal = document.getElementById('settingsModal');
@@ -61,6 +84,8 @@ document.addEventListener('DOMContentLoaded', () => {
   let activeEngine = localStorage.getItem('omni_engine') || 'auto';
   let customApi = localStorage.getItem('omni_custom_api') || '';
   let autoPreview = localStorage.getItem('omni_auto_preview') !== 'false';
+  let currentMode = 'single';
+  let batchItems = [];
 
   // --- Synchronize Audio & Video for Dual-Stream Playback (YouTube) ---
   if (videoPlayer && audioPlayer) {
@@ -586,7 +611,80 @@ document.addEventListener('DOMContentLoaded', () => {
     };
   };
 
-  // --- Main Fetch Function ---
+  /**
+   * Core Reusable Media Extractor with 3x Auto-Retry Engine
+   */
+  const extractMediaWithRetry = async (cleanUrl, onAttemptStatus = null) => {
+    const detected = detectPlatform(cleanUrl);
+    const MAX_RETRIES = 3;
+    let attempt = 0;
+    let lastError = null;
+    let result = null;
+
+    while (attempt < MAX_RETRIES) {
+      attempt++;
+      const attemptLabel = `(Attempt ${attempt}/${MAX_RETRIES})`;
+
+      try {
+        if (activeEngine === 'custom') {
+          if (onAttemptStatus) onAttemptStatus(`Connecting to custom engine... ${attemptLabel}`);
+          result = await extractWithCustom(cleanUrl, customApi);
+        } else {
+          if (detected?.key === 'kuaishou') {
+            if (onAttemptStatus) onAttemptStatus(`Extracting Kuaishou / Kwai video... ${attemptLabel}`);
+            result = await extractKuaishou(cleanUrl);
+          } else if (detected?.key === 'instagram') {
+            if (onAttemptStatus) onAttemptStatus(`Extracting Instagram Reel full quality stream... ${attemptLabel}`);
+            result = await extractInstagram(cleanUrl);
+          } else if (detected?.key === 'facebook') {
+            if (onAttemptStatus) onAttemptStatus(`Extracting Facebook Reel video & audio... ${attemptLabel}`);
+            result = await extractFacebook(cleanUrl);
+          } else if (detected?.key === 'youtube') {
+            if (onAttemptStatus) onAttemptStatus(`Extracting YouTube Short streams... ${attemptLabel}`);
+            result = await extractYouTubeInvidious(cleanUrl);
+          } else if (detected?.key === 'tiktok') {
+            if (onAttemptStatus) onAttemptStatus(`Extracting TikTok video without watermark... ${attemptLabel}`);
+            result = await extractTikTok(cleanUrl);
+          } else {
+            if (onAttemptStatus) onAttemptStatus(`Auto-resolving platform media stream... ${attemptLabel}`);
+            try {
+              result = await extractFacebook(cleanUrl);
+            } catch (e1) {
+              try {
+                result = await extractKuaishou(cleanUrl);
+              } catch (e2) {
+                try {
+                  result = await extractInstagram(cleanUrl);
+                } catch (e3) {
+                  result = await extractYouTubeInvidious(cleanUrl);
+                }
+              }
+            }
+          }
+        }
+
+        if (result && result.directUrl) {
+          result.platform = detected;
+          return result;
+        } else {
+          throw new Error('No downloadable stream found in response.');
+        }
+      } catch (attemptErr) {
+        lastError = attemptErr;
+        console.warn(`Extraction attempt ${attempt}/${MAX_RETRIES} failed for ${cleanUrl}:`, attemptErr.message);
+
+        if (attempt < MAX_RETRIES) {
+          const delaySec = attempt;
+          if (onAttemptStatus) onAttemptStatus(`Server busy. Auto-retrying in ${delaySec}s... (Attempt ${attempt + 1}/${MAX_RETRIES})`);
+          await new Promise(res => setTimeout(res, delaySec * 1000));
+        }
+      }
+    }
+
+    throw lastError || new Error('Could not find a downloadable video stream after 3 attempts.');
+  };
+
+  // --- Single Video Fetch Function ---
   const fetchVideo = async () => {
     const rawInput = videoUrlInput.value.trim();
     if (!rawInput) {
@@ -605,77 +703,10 @@ document.addEventListener('DOMContentLoaded', () => {
     loadingState.classList.remove('hidden');
     downloadBtn.disabled = true;
 
-    const detected = detectPlatform(cleanUrl);
-    let result = null;
-    const MAX_RETRIES = 3;
-    let attempt = 0;
-    let lastError = null;
-
     try {
-      while (attempt < MAX_RETRIES) {
-        attempt++;
-        const attemptLabel = `(Attempt ${attempt}/${MAX_RETRIES})`;
-
-        try {
-          if (activeEngine === 'custom') {
-            loadingStatusText.textContent = `Connecting to custom engine... ${attemptLabel}`;
-            result = await extractWithCustom(cleanUrl, customApi);
-          } else {
-            if (detected?.key === 'kuaishou') {
-              loadingStatusText.textContent = `Extracting Kuaishou / Kwai video... ${attemptLabel}`;
-              result = await extractKuaishou(cleanUrl);
-            } else if (detected?.key === 'instagram') {
-              loadingStatusText.textContent = `Extracting Instagram Reel full quality stream... ${attemptLabel}`;
-              result = await extractInstagram(cleanUrl);
-            } else if (detected?.key === 'facebook') {
-              loadingStatusText.textContent = `Extracting Facebook Reel video & audio... ${attemptLabel}`;
-              result = await extractFacebook(cleanUrl);
-            } else if (detected?.key === 'youtube') {
-              loadingStatusText.textContent = `Extracting YouTube Short streams... ${attemptLabel}`;
-              result = await extractYouTubeInvidious(cleanUrl);
-            } else if (detected?.key === 'tiktok') {
-              loadingStatusText.textContent = `Extracting TikTok video without watermark... ${attemptLabel}`;
-              result = await extractTikTok(cleanUrl);
-            } else {
-              // Auto detect attempt across engines
-              loadingStatusText.textContent = `Auto-resolving platform media stream... ${attemptLabel}`;
-              try {
-                result = await extractFacebook(cleanUrl);
-              } catch (e1) {
-                try {
-                  result = await extractKuaishou(cleanUrl);
-                } catch (e2) {
-                  try {
-                    result = await extractInstagram(cleanUrl);
-                  } catch (e3) {
-                    result = await extractYouTubeInvidious(cleanUrl);
-                  }
-                }
-              }
-            }
-          }
-
-          if (result && result.directUrl) {
-            // Successfully extracted media stream! Break retry loop
-            break;
-          } else {
-            throw new Error('No downloadable stream found in response.');
-          }
-        } catch (attemptErr) {
-          lastError = attemptErr;
-          console.warn(`Extraction attempt ${attempt}/${MAX_RETRIES} failed:`, attemptErr.message);
-
-          if (attempt < MAX_RETRIES) {
-            const delaySec = attempt; // 1s then 2s
-            loadingStatusText.textContent = `Server busy or connection lag. Auto-retrying in ${delaySec}s... (Attempt ${attempt + 1}/${MAX_RETRIES})`;
-            await new Promise(res => setTimeout(res, delaySec * 1000));
-          }
-        }
-      }
-
-      if (!result || !result.directUrl) {
-        throw lastError || new Error('Could not find a downloadable video stream for this link after 3 attempts.');
-      }
+      const result = await extractMediaWithRetry(cleanUrl, (status) => {
+        loadingStatusText.textContent = status;
+      });
 
       // Pre-buffering Step: Pre-fetch video blob into memory for instant 0-second saving!
       loadingStatusText.textContent = 'Pre-buffering video file for instant 0s download...';
@@ -697,19 +728,412 @@ document.addEventListener('DOMContentLoaded', () => {
         console.warn('Direct pre-buffering skipped (cross-origin streaming enabled):', blobErr);
       }
 
-      displayResult(result, detected);
+      displayResult(result, result.platform);
     } catch (err) {
       console.error(err);
       let userFriendlyMsg = err.message || 'Failed to fetch video.';
       if (userFriendlyMsg.includes('404')) {
         userFriendlyMsg = 'Video not found (404). Ensure the link points directly to a single public reel/short.';
       }
-      showError(userFriendlyMsg, cleanUrl, detected);
+      showError(userFriendlyMsg, cleanUrl, detectPlatform(cleanUrl));
     } finally {
       loadingState.classList.add('hidden');
       downloadBtn.disabled = false;
     }
   };
+
+  // --- Batch Mode Implementation ---
+  const parseBatchUrls = (text) => {
+    if (!text || typeof text !== 'string') return [];
+    const lines = text.split(/[\r\n]+/);
+    const extracted = [];
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+      const clean = cleanInputUrl(trimmed);
+      if (clean && !extracted.includes(clean)) {
+        extracted.push(clean);
+      }
+    }
+    return extracted;
+  };
+
+  const updateBatchCount = () => {
+    if (!batchUrlsInput || !batchCountBadge) return;
+    const urls = parseBatchUrls(batchUrlsInput.value);
+    const count = urls.length;
+    batchCountBadge.textContent = `${count} ${count === 1 ? 'link' : 'links'} detected`;
+    if (batchFetchBtn) batchFetchBtn.disabled = count === 0;
+  };
+
+  batchUrlsInput?.addEventListener('input', updateBatchCount);
+
+  batchClearBtn?.addEventListener('click', () => {
+    if (batchUrlsInput) batchUrlsInput.value = '';
+    updateBatchCount();
+    if (batchResultCard) batchResultCard.classList.add('hidden');
+    if (batchQueueList) batchQueueList.innerHTML = '';
+    batchItems = [];
+  });
+
+  batchPasteBtn?.addEventListener('click', async () => {
+    try {
+      const text = await navigator.clipboard.readText();
+      if (text && batchUrlsInput) {
+        const existing = batchUrlsInput.value.trim();
+        batchUrlsInput.value = existing ? `${existing}\n${text.trim()}` : text.trim();
+        updateBatchCount();
+      }
+    } catch (e) {
+      alert('Please paste your links directly into the batch box.');
+    }
+  });
+
+  batchSampleBtn?.addEventListener('click', () => {
+    if (!batchUrlsInput) return;
+    batchUrlsInput.value = [
+      'https://www.facebook.com/share/r/191Ta2ZpKc/',
+      'https://youtube.com/shorts/D-OlJCCs-J8',
+      'https://v.kuaishou.com/KaLfeAAT'
+    ].join('\n');
+    updateBatchCount();
+  });
+
+  // Mode Switch Tabs
+  singleModeTab?.addEventListener('click', () => {
+    currentMode = 'single';
+    singleModeTab.classList.add('active');
+    batchModeTab.classList.remove('active');
+    singleInputContainer.classList.remove('hidden');
+    batchInputContainer.classList.add('hidden');
+    batchResultCard.classList.add('hidden');
+    if (currentVideoData) {
+      resultCard.classList.remove('hidden');
+    }
+    if (window.lucide) window.lucide.createIcons();
+  });
+
+  batchModeTab?.addEventListener('click', () => {
+    currentMode = 'batch';
+    batchModeTab.classList.add('active');
+    singleModeTab.classList.remove('active');
+    batchInputContainer.classList.remove('hidden');
+    singleInputContainer.classList.add('hidden');
+    resultCard.classList.add('hidden');
+    errorState.classList.add('hidden');
+    loadingState.classList.add('hidden');
+    detectionNotice.classList.add('hidden');
+    if (batchItems.length > 0) {
+      batchResultCard.classList.remove('hidden');
+    }
+    updateBatchCount();
+    if (window.lucide) window.lucide.createIcons();
+  });
+
+  const createQueueItemDOM = (item) => {
+    const div = document.createElement('div');
+    div.className = 'queue-item';
+    div.id = item.id;
+
+    const platformName = item.platform ? item.platform.name : 'Video';
+    const platformIcon = item.platform ? item.platform.icon : 'film';
+
+    div.innerHTML = `
+      <div class="queue-left-col">
+        <div class="queue-thumb-wrapper" id="${item.id}-thumb">
+          <i data-lucide="${platformIcon}"></i>
+        </div>
+        <div class="queue-info">
+          <div class="queue-title" id="${item.id}-title" title="${item.url}">${item.url}</div>
+          <div class="queue-meta-row">
+            <span class="queue-platform-badge">
+              <i data-lucide="${platformIcon}" style="width:12px;height:12px;"></i>
+              <span>${platformName}</span>
+            </span>
+            <span class="queue-status-badge pending" id="${item.id}-status">
+              <i data-lucide="clock" style="width:12px;height:12px;"></i>
+              <span id="${item.id}-status-text">Pending</span>
+            </span>
+          </div>
+        </div>
+      </div>
+      <div class="queue-actions" id="${item.id}-actions"></div>
+    `;
+    return div;
+  };
+
+  const updateQueueItemDOM = (item, statusText) => {
+    const statusEl = document.getElementById(`${item.id}-status`);
+    const statusTextEl = document.getElementById(`${item.id}-status-text`);
+    const titleEl = document.getElementById(`${item.id}-title`);
+    const thumbEl = document.getElementById(`${item.id}-thumb`);
+    const actionsEl = document.getElementById(`${item.id}-actions`);
+
+    if (statusEl && statusTextEl) {
+      statusEl.className = `queue-status-badge ${item.status}`;
+      statusTextEl.textContent = statusText;
+    }
+
+    if (item.data) {
+      if (titleEl && item.data.title) {
+        titleEl.textContent = item.data.title;
+      }
+      if (thumbEl && item.data.thumbnail) {
+        thumbEl.innerHTML = `<img src="${item.data.thumbnail}" class="queue-thumb-img" alt="Thumb" referrerpolicy="no-referrer" />`;
+      }
+      if (actionsEl && item.status === 'ready') {
+        actionsEl.innerHTML = `
+          <button type="button" class="mini-btn mini-btn-primary" id="${item.id}-dl-btn">
+            <i data-lucide="download"></i> Download
+          </button>
+          <button type="button" class="mini-btn mini-btn-secondary" id="${item.id}-copy-btn" title="Copy Stream URL">
+            <i data-lucide="copy"></i>
+          </button>
+        `;
+
+        const dlBtn = document.getElementById(`${item.id}-dl-btn`);
+        dlBtn?.addEventListener('click', () => {
+          const filename = getSafeFilename(item.data.title, 'mp4');
+          if (item.data.preloadedBlob) {
+            saveBlobLocally(item.data.preloadedBlob, filename);
+          } else {
+            triggerFileDownload(item.data.directUrl, filename);
+          }
+        });
+
+        const copyBtn = document.getElementById(`${item.id}-copy-btn`);
+        copyBtn?.addEventListener('click', () => {
+          navigator.clipboard.writeText(item.data.directUrl).then(() => {
+            copyBtn.innerHTML = `<i data-lucide="check"></i>`;
+            if (window.lucide) window.lucide.createIcons();
+            setTimeout(() => {
+              copyBtn.innerHTML = `<i data-lucide="copy"></i>`;
+              if (window.lucide) window.lucide.createIcons();
+            }, 2000);
+          });
+        });
+      }
+    } else if (item.status === 'error' && actionsEl) {
+      actionsEl.innerHTML = `
+        <button type="button" class="mini-btn mini-btn-secondary" id="${item.id}-retry-btn">
+          <i data-lucide="refresh-cw"></i> Retry
+        </button>
+      `;
+      const retryBtn = document.getElementById(`${item.id}-retry-btn`);
+      retryBtn?.addEventListener('click', async () => {
+        item.status = 'extracting';
+        updateQueueItemDOM(item, 'Retrying...');
+        try {
+          const data = await extractMediaWithRetry(item.url, (msg) => updateQueueItemDOM(item, msg));
+          item.data = data;
+          item.status = 'ready';
+          updateQueueItemDOM(item, `${data.qualityLabel ? data.qualityLabel.split(' ')[0] : 'HD'} Ready`);
+        } catch (e) {
+          item.status = 'error';
+          updateQueueItemDOM(item, 'Failed');
+        }
+        if (window.lucide) window.lucide.createIcons();
+      });
+    }
+
+    if (window.lucide) window.lucide.createIcons();
+  };
+
+  const startBatchFetch = async () => {
+    const urls = parseBatchUrls(batchUrlsInput.value);
+    if (urls.length === 0) {
+      alert('Please enter at least one valid video URL.');
+      return;
+    }
+
+    hideStates();
+    batchResultCard.classList.remove('hidden');
+    batchQueueList.innerHTML = '';
+    batchDownloadZipBtn.disabled = true;
+    batchDownloadSeqBtn.disabled = true;
+    batchFetchBtn.disabled = true;
+
+    // Build Queue Items
+    batchItems = urls.map((url, idx) => ({
+      id: `queue-item-${idx}`,
+      url,
+      platform: detectPlatform(url),
+      status: 'pending',
+      statusText: 'Waiting in queue...',
+      data: null,
+      error: null
+    }));
+
+    // Render in DOM
+    batchItems.forEach(item => {
+      batchQueueList.appendChild(createQueueItemDOM(item));
+    });
+
+    if (window.lucide) window.lucide.createIcons();
+    batchResultCard.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+
+    let completedCount = 0;
+    const totalCount = batchItems.length;
+
+    const updateBatchProgress = () => {
+      const pct = Math.round((completedCount / totalCount) * 100);
+      batchProgressBar.style.width = `${pct}%`;
+      const readyCount = batchItems.filter(i => i.status === 'ready').length;
+      batchProgressTitle.textContent = `Batch Processing (${completedCount}/${totalCount} Completed)`;
+      batchProgressSubtext.textContent = `${readyCount} ready to download • ${totalCount - completedCount} in progress`;
+    };
+
+    updateBatchProgress();
+
+    // Concurrent Worker Queue (concurrency = 2)
+    const CONCURRENCY = 2;
+    let nextIndex = 0;
+
+    const worker = async () => {
+      while (nextIndex < batchItems.length) {
+        const item = batchItems[nextIndex++];
+        item.status = 'extracting';
+        updateQueueItemDOM(item, 'Extracting stream...');
+
+        try {
+          const data = await extractMediaWithRetry(item.url, (msg) => {
+            updateQueueItemDOM(item, msg);
+          });
+
+          // Pre-buffer video blob in memory for instant 0s zip & download
+          try {
+            const ctrl = new AbortController();
+            const timeout = setTimeout(() => ctrl.abort(), 12000);
+            const res = await fetch(data.directUrl, { signal: ctrl.signal, referrerPolicy: 'no-referrer' });
+            clearTimeout(timeout);
+            if (res.ok) {
+              data.preloadedBlob = await res.blob();
+            }
+          } catch (be) {}
+
+          item.data = data;
+          item.status = 'ready';
+          updateQueueItemDOM(item, `${data.qualityLabel ? data.qualityLabel.split(' ')[0] : 'HD'} Ready`);
+        } catch (err) {
+          item.status = 'error';
+          item.error = err.message || 'Failed';
+          updateQueueItemDOM(item, item.error.includes('404') ? 'Video 404' : 'Failed');
+        } finally {
+          completedCount++;
+          updateBatchProgress();
+        }
+      }
+    };
+
+    const workerPromises = [];
+    for (let i = 0; i < Math.min(CONCURRENCY, batchItems.length); i++) {
+      workerPromises.push(worker());
+    }
+    await Promise.all(workerPromises);
+
+    // Completion
+    batchFetchBtn.disabled = false;
+    const readyItems = batchItems.filter(i => i.status === 'ready');
+    if (readyItems.length > 0) {
+      batchDownloadZipBtn.disabled = false;
+      batchDownloadSeqBtn.disabled = false;
+      batchProgressTitle.textContent = `Batch Complete! (${readyItems.length}/${totalCount} Ready)`;
+      batchProgressSubtext.textContent = `All extracted videos are ready for 1-click ZIP or sequential download.`;
+    } else {
+      batchProgressTitle.textContent = `Batch Finished (0 of ${totalCount} Succeeded)`;
+      batchProgressSubtext.textContent = `Please verify that the URLs point to active, public videos.`;
+    }
+
+    if (window.lucide) window.lucide.createIcons();
+  };
+
+  batchFetchBtn?.addEventListener('click', startBatchFetch);
+
+  // Download All as ZIP
+  batchDownloadZipBtn?.addEventListener('click', async () => {
+    const readyItems = batchItems.filter(i => i.status === 'ready' && i.data);
+    if (readyItems.length === 0) return;
+
+    if (typeof JSZip === 'undefined') {
+      alert('ZIP archive module is still loading. Please use "Download Sequentially" or try again in a moment.');
+      return;
+    }
+
+    const originalHtml = batchDownloadZipBtn.innerHTML;
+    batchDownloadZipBtn.disabled = true;
+    batchDownloadZipBtn.innerHTML = `<i data-lucide="loader-2" class="spin-icon"></i> <span>Creating ZIP Archive...</span>`;
+    if (window.lucide) window.lucide.createIcons();
+
+    try {
+      const zip = new JSZip();
+      let addedCount = 0;
+
+      for (let i = 0; i < readyItems.length; i++) {
+        const item = readyItems[i];
+        const filename = `${i + 1}_${getSafeFilename(item.data.title, 'mp4')}`;
+
+        if (item.data.preloadedBlob) {
+          zip.file(filename, item.data.preloadedBlob);
+          addedCount++;
+        } else {
+          try {
+            const r = await fetch(item.data.directUrl, { referrerPolicy: 'no-referrer' });
+            if (r.ok) {
+              const b = await r.blob();
+              zip.file(filename, b);
+              addedCount++;
+            }
+          } catch (e) {
+            console.warn(`Could not add ${filename} to zip due to cross-origin CDN restriction:`, e);
+          }
+        }
+      }
+
+      if (addedCount > 0) {
+        batchDownloadZipBtn.innerHTML = `<i data-lucide="loader-2" class="spin-icon"></i> <span>Compressing ZIP...</span>`;
+        if (window.lucide) window.lucide.createIcons();
+        const zipBlob = await zip.generateAsync({ type: 'blob' });
+        saveBlobLocally(zipBlob, `OmniDownloader_Batch_${Date.now()}.zip`);
+        batchDownloadZipBtn.innerHTML = `<i data-lucide="check-circle-2"></i> <span>ZIP Downloaded!</span>`;
+      } else {
+        alert('Due to browser cross-origin protection on these video hosts, please click "Download Sequentially" to save each video directly!');
+      }
+    } catch (zipErr) {
+      console.error('ZIP error:', zipErr);
+      alert('Could not generate ZIP archive. Please use "Download Sequentially" instead.');
+    } finally {
+      setTimeout(() => {
+        batchDownloadZipBtn.innerHTML = originalHtml;
+        batchDownloadZipBtn.disabled = false;
+        if (window.lucide) window.lucide.createIcons();
+      }, 3500);
+    }
+  });
+
+  // Download All Sequentially
+  batchDownloadSeqBtn?.addEventListener('click', () => {
+    const readyItems = batchItems.filter(i => i.status === 'ready' && i.data);
+    if (readyItems.length === 0) return;
+
+    readyItems.forEach((item, index) => {
+      setTimeout(() => {
+        const filename = `${index + 1}_${getSafeFilename(item.data.title, 'mp4')}`;
+        if (item.data.preloadedBlob) {
+          saveBlobLocally(item.data.preloadedBlob, filename);
+        } else {
+          triggerFileDownload(item.data.directUrl, filename);
+        }
+      }, index * 900);
+    });
+
+    const originalHtml = batchDownloadSeqBtn.innerHTML;
+    batchDownloadSeqBtn.innerHTML = `<i data-lucide="check-circle-2"></i> <span>Downloads Initiated!</span>`;
+    if (window.lucide) window.lucide.createIcons();
+    setTimeout(() => {
+      batchDownloadSeqBtn.innerHTML = originalHtml;
+      if (window.lucide) window.lucide.createIcons();
+    }, 4000);
+  });
 
   // --- Display Result (Single Download Button, Pre-Buffered, Complete Sound) ---
   const displayResult = (data, platform) => {
