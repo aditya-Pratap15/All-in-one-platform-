@@ -401,7 +401,7 @@ document.addEventListener('DOMContentLoaded', () => {
     duration: data.duration ? `${Math.floor(data.duration / 60)}:${data.duration % 60}` : 'Full Video',
     sourceUrl: cleanUrl,
     directUrl: data.url,
-    audioUrl: '',
+    audioUrl: data.audio_url || '',
     qualityLabel: 'Original Quality (Clean No Watermark)'
   });
 
@@ -1443,12 +1443,16 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     const playSource = data.preloadedBlobUrl || data.directUrl;
+    videoPlayer.muted = false;
+    videoPlayer.volume = 1.0;
     videoPlayer.src = playSource;
     videoPlayer.load();
 
-    // Secondary audio track synchronization for YouTube if separate
+    // Secondary audio track synchronization if separate audio stream exists
     if (data.audioUrl) {
       audioPlayer.src = data.audioUrl;
+      audioPlayer.volume = 1.0;
+      audioPlayer.muted = false;
       audioPlayer.load();
     } else {
       audioPlayer.removeAttribute('src');
@@ -1533,37 +1537,17 @@ document.addEventListener('DOMContentLoaded', () => {
   };
 
   const triggerFileDownload = async (sourceUrl, filename, directUrl = '') => {
-    if (!sourceUrl && !directUrl) return;
+    const targetUrl = directUrl || sourceUrl;
+    if (!targetUrl) return;
 
     indicateSuccess('Initiating download...', false);
 
-    const isYouTube = (sourceUrl && (sourceUrl.includes('youtube.com') || sourceUrl.includes('youtu.be')));
-
-    // 1. If Local Engine is running (start.bat), use local engine for 100% full quality & audio
     await checkEngines();
-    if (isLocalEngineOnline || hasLocalEngine) {
-      const targetUrl = sourceUrl || directUrl;
-      const downloadProxyUrl = `${LOCAL_ENGINE_URL}/api/download-file?url=${encodeURIComponent(targetUrl)}&filename=${encodeURIComponent(filename)}`;
+    const activeEngineBase = isLocalEngineOnline ? LOCAL_ENGINE_URL : (isCloudEngineOnline ? CLOUD_ENGINE_URL : '');
 
-      // Direct native browser download via link with Content-Disposition
-      // The browser's native download manager immediately takes over and streams straight to Downloads!
-      const a = document.createElement('a');
-      a.href = downloadProxyUrl;
-      a.setAttribute('download', filename);
-      document.body.appendChild(a);
-      a.click();
-      setTimeout(() => {
-        try { document.body.removeChild(a); } catch (e) {}
-      }, 1000);
-
-      indicateSuccess('Download started in browser!');
-      return;
-    }
-
-    // 2. If online on Cloud Engine (Render.com) - For Kuaishou, Instagram, Facebook, TikTok
-    if ((isCloudEngineOnline || hasCloudEngine) && !isYouTube) {
-      const targetUrl = directUrl || sourceUrl;
-      const downloadProxyUrl = `${CLOUD_ENGINE_URL}/api/download-file?url=${encodeURIComponent(targetUrl)}&filename=${encodeURIComponent(filename)}`;
+    // 1. If Local or Cloud Engine is active, trigger instant native browser download with attachment header
+    if (activeEngineBase) {
+      const downloadProxyUrl = `${activeEngineBase}/api/download-file?url=${encodeURIComponent(targetUrl)}&filename=${encodeURIComponent(filename)}`;
 
       const a = document.createElement('a');
       a.href = downloadProxyUrl;
@@ -1578,45 +1562,19 @@ document.addEventListener('DOMContentLoaded', () => {
       return;
     }
 
-    // 3. Direct blob save from directUrl (for Kuaishou or CORS streams)
-    if (directUrl && !isYouTube) {
-      try {
-        const ctrl = new AbortController();
-        const tid = setTimeout(() => ctrl.abort(), 7000);
-        const res = await fetch(directUrl, { signal: ctrl.signal, referrerPolicy: 'no-referrer' });
-        clearTimeout(tid);
-        if (res.ok) {
-          const blob = await res.blob();
-          saveBlobLocally(blob, filename);
-          indicateSuccess('Saved to Downloads!');
-          return;
-        }
-      } catch (e) {}
-    }
+    // 2. Direct browser stream link fallback
+    const a = document.createElement('a');
+    a.href = targetUrl;
+    a.setAttribute('download', filename);
+    a.target = '_blank';
+    a.rel = 'noopener noreferrer';
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => {
+      try { document.body.removeChild(a); } catch (e) {}
+    }, 1000);
 
-    // 4. Fallback: Browser native anchor click directly to the stream (Never hangs)
-    const fallbackUrl = directUrl || sourceUrl;
-    if (fallbackUrl) {
-      const a = document.createElement('a');
-      a.href = fallbackUrl;
-      a.setAttribute('download', filename);
-      a.target = '_blank';
-      a.rel = 'noopener noreferrer';
-      document.body.appendChild(a);
-      a.click();
-      setTimeout(() => {
-        try { document.body.removeChild(a); } catch(e) {}
-      }, 1500);
-
-      if (isYouTube && !isLocalEngineOnline) {
-        indicateSuccess('Opening stream... (For 100% merged sound, run start.bat)');
-      } else {
-        indicateSuccess('Download link triggered!');
-      }
-      return;
-    }
-
-    indicateSuccess('Download failed. Please copy link.');
+    indicateSuccess('Download started in browser!');
   };
 
   const getSafeFilename = (title, ext = 'mp4') => {

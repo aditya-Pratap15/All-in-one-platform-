@@ -246,7 +246,7 @@ def extract_video(url: str = Query(..., description="The URL of the video to ext
 
     # 2. Universal yt-dlp extraction (Instagram, Facebook, YouTube, TikTok)
     ydl_opts = {
-        'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
+        'format': 'best',
         'quiet': True,
         'no_warnings': True,
         'extract_flat': False
@@ -258,13 +258,21 @@ def extract_video(url: str = Query(..., description="The URL of the video to ext
             
             direct_url = info.get("url")
             formats = info.get("formats", [])
-            if not direct_url and formats:
-                # Prefer mp4 format with video and audio
-                mp4_formats = [f for f in formats if f.get("ext") == "mp4" and f.get("url")]
-                if mp4_formats:
-                    direct_url = mp4_formats[-1].get("url")
-                else:
-                    direct_url = formats[-1].get("url")
+            audio_url = None
+
+            # 1. Prioritize formats that have BOTH video AND audio merged
+            merged_formats = [f for f in formats if f.get("vcodec") != "none" and f.get("acodec") != "none" and f.get("url")]
+            if merged_formats:
+                # Pick the highest quality stream with audio
+                direct_url = merged_formats[-1].get("url")
+            elif formats:
+                # If only separate streams exist, find video and audio tracks
+                video_formats = [f for f in formats if f.get("vcodec") != "none" and f.get("url")]
+                audio_formats = [f for f in formats if f.get("acodec") != "none" and f.get("url")]
+                if video_formats:
+                    direct_url = video_formats[-1].get("url")
+                if audio_formats:
+                    audio_url = audio_formats[-1].get("url")
 
             return {
                 "title": info.get("title", "Video"),
@@ -272,6 +280,7 @@ def extract_video(url: str = Query(..., description="The URL of the video to ext
                 "thumbnail": info.get("thumbnail"),
                 "duration": info.get("duration"),
                 "url": direct_url,
+                "audio_url": audio_url,
                 "formats": [
                     {
                         "format_id": f.get("format_id"),
