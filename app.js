@@ -84,6 +84,9 @@ document.addEventListener('DOMContentLoaded', () => {
   const engineDot = document.getElementById('engineDot');
   const engineStatusText = document.getElementById('engineStatusText');
 
+  // Dedicated 24/7 Render Cloud Engine
+  const CLOUD_ENGINE_URL = 'https://omni-downloader-kb73.onrender.com';
+
   // State
   let currentVideoData = null;
   let activeEngine = localStorage.getItem('omni_engine') || 'auto';
@@ -93,38 +96,56 @@ document.addEventListener('DOMContentLoaded', () => {
   let batchItems = [];
   let isLocalEngineOnline = false;
 
-  const updateEngineStatusUI = (online) => {
+  const updateEngineStatusUI = (isLocal, isCloud = true) => {
     if (!engineStatusPill || !engineStatusText) return;
-    if (online) {
+    if (isLocal) {
       engineStatusPill.className = 'engine-status-pill';
-      engineStatusPill.title = 'High-Speed Engine is active (Instant 100% extraction for all platforms)';
-      engineStatusText.textContent = 'High-Speed Engine';
+      engineStatusPill.title = 'High-Speed Local Engine Active (http://127.0.0.1:8000)';
+      engineStatusText.textContent = 'High-Speed Local Engine';
+    } else if (isCloud) {
+      engineStatusPill.className = 'engine-status-pill cloud-active';
+      engineStatusPill.title = '24/7 Cloud Engine Active (omni-downloader-kb73.onrender.com)';
+      engineStatusText.textContent = '24/7 Cloud Engine';
     } else {
       engineStatusPill.className = 'engine-status-pill offline';
-      engineStatusPill.title = 'Cloud engine active. Run start.bat for instant local 4K extraction.';
-      engineStatusText.textContent = 'Cloud Engine';
+      engineStatusPill.title = 'Connecting to engine...';
+      engineStatusText.textContent = 'Connecting Engine...';
     }
   };
 
-  const checkLocalEngine = async () => {
+  const checkEngines = async () => {
+    // 1. Check local engine first
     try {
       const res = await fetch('http://127.0.0.1:8000/api/status', { signal: AbortSignal.timeout(1000) });
       if (res.ok) {
         const data = await res.json();
         if (data.status === 'ok') {
           isLocalEngineOnline = true;
-          updateEngineStatusUI(true);
-          return true;
+          updateEngineStatusUI(true, false);
+          return;
         }
       }
     } catch (e) {}
+
     isLocalEngineOnline = false;
-    updateEngineStatusUI(false);
-    return false;
+
+    // 2. Check 24/7 Render cloud engine
+    try {
+      const res = await fetch(`${CLOUD_ENGINE_URL}/api/status`, { signal: AbortSignal.timeout(3000) });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.status === 'ok') {
+          updateEngineStatusUI(false, true);
+          return;
+        }
+      }
+    } catch (e) {}
+
+    updateEngineStatusUI(false, false);
   };
 
   // Initial check on load
-  checkLocalEngine();
+  checkEngines();
 
   // --- Synchronize Audio & Video for Dual-Stream Playback (YouTube) ---
   if (videoPlayer && audioPlayer) {
@@ -355,31 +376,46 @@ document.addEventListener('DOMContentLoaded', () => {
   // --- Extractor Implementations ---
 
   /**
-   * Helper: Try local engine extraction first
+   * Helper: Try local engine or dedicated Render 24/7 cloud engine
    */
-  const tryLocalEngine = async (cleanUrl) => {
-    try {
-      const res = await fetch(`http://127.0.0.1:8000/download?url=${encodeURIComponent(cleanUrl)}`, {
-        signal: AbortSignal.timeout(6000)
-      });
-      if (res.ok) {
-        const data = await res.json();
-        if (data.url) {
-          isLocalEngineOnline = true;
-          updateEngineStatusUI(true);
-          return {
-            title: data.title || 'Video',
-            author: data.uploader || 'Creator',
-            thumbnail: data.thumbnail || '',
-            duration: data.duration ? `${Math.floor(data.duration / 60)}:${data.duration % 60}` : 'Full Video',
-            sourceUrl: cleanUrl,
-            directUrl: data.url,
-            audioUrl: '',
-            qualityLabel: 'Original Quality (Clean No Watermark)'
-          };
+  const formatEngineData = (data, cleanUrl) => ({
+    title: data.title || 'Video',
+    author: data.uploader || 'Creator',
+    thumbnail: data.thumbnail || '',
+    duration: data.duration ? `${Math.floor(data.duration / 60)}:${data.duration % 60}` : 'Full Video',
+    sourceUrl: cleanUrl,
+    directUrl: data.url,
+    audioUrl: '',
+    qualityLabel: 'Original Quality (Clean No Watermark)'
+  });
+
+  const tryBackendEngine = async (cleanUrl, platform = '') => {
+    // 1. Try local engine first (instant if running start.bat)
+    if (isLocalEngineOnline) {
+      try {
+        const res = await fetch(`http://127.0.0.1:8000/download?url=${encodeURIComponent(cleanUrl)}`, {
+          signal: AbortSignal.timeout(6000)
+        });
+        if (res.ok) {
+          const data = await res.json();
+          if (data.url) return formatEngineData(data, cleanUrl);
         }
-      }
-    } catch (e) {}
+      } catch (e) {}
+    }
+
+    // 2. Try Render 24/7 Cloud Engine (online anywhere, anytime on any device)
+    if (CLOUD_ENGINE_URL && platform !== 'youtube') {
+      try {
+        const res = await fetch(`${CLOUD_ENGINE_URL}/download?url=${encodeURIComponent(cleanUrl)}`, {
+          signal: AbortSignal.timeout(15000)
+        });
+        if (res.ok) {
+          const data = await res.json();
+          if (data.url) return formatEngineData(data, cleanUrl);
+        }
+      } catch (e) {}
+    }
+
     return null;
   };
 
@@ -390,9 +426,9 @@ document.addEventListener('DOMContentLoaded', () => {
   const extractKuaishou = async (url) => {
     const clean = cleanInputUrl(url);
 
-    // Method A: Check local engine first (Instant, unwatermarked)
-    const local = await tryLocalEngine(clean);
-    if (local) return local;
+    // Method A: Check local / 24-7 Render cloud engine first
+    const backend = await tryBackendEngine(clean, 'kuaishou');
+    if (backend) return backend;
 
     // Method B: Multiple CORS Proxies parsing window.INIT_STATE
     const proxyEndpoints = [
@@ -464,7 +500,7 @@ document.addEventListener('DOMContentLoaded', () => {
       } catch (pe) {}
     }
 
-    throw new Error('Unable to extract Kuaishou video. Please run start.bat in the project directory for 100% instant extraction.');
+    throw new Error('Unable to extract Kuaishou video. Please verify the link is active.');
   };
 
   /**
@@ -474,9 +510,9 @@ document.addEventListener('DOMContentLoaded', () => {
   const extractInstagram = async (url) => {
     const clean = cleanInputUrl(url);
 
-    // Method A: Check local engine first
-    const local = await tryLocalEngine(clean);
-    if (local) return local;
+    // Method A: Check local / 24-7 Render cloud engine first
+    const backend = await tryBackendEngine(clean, 'instagram');
+    if (backend) return backend;
 
     // Method B: Dedicated fast endpoints with 3.5s timeout
     const endpoints = [
@@ -536,7 +572,7 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     } catch (e2) {}
 
-    throw new Error('Unable to fetch Instagram Reel. Please run start.bat for instant 1080p extraction.');
+    throw new Error('Unable to fetch Instagram Reel. Please check that the Reel is publicly viewable.');
   };
 
   /**
@@ -546,9 +582,9 @@ document.addEventListener('DOMContentLoaded', () => {
   const extractFacebook = async (url) => {
     const clean = cleanInputUrl(url);
 
-    // Method A: Check local engine first
-    const local = await tryLocalEngine(clean);
-    if (local) return local;
+    // Method A: Check local / 24-7 Render cloud engine first
+    const backend = await tryBackendEngine(clean, 'facebook');
+    if (backend) return backend;
 
     // Method B: Dedicated Facebook stream extractor with 3.5s timeout
     const endpoints = [
@@ -577,7 +613,7 @@ document.addEventListener('DOMContentLoaded', () => {
       } catch (e1) {}
     }
 
-    throw new Error('Unable to extract Facebook video. Please run start.bat for instant 1080p extraction.');
+    throw new Error('Unable to extract Facebook video. Please check that the Reel is publicly viewable.');
   };
 
   /**
@@ -594,8 +630,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const clean = cleanInputUrl(url);
 
     // Method A: Check local engine first
-    const local = await tryLocalEngine(clean);
-    if (local) return local;
+    const backend = await tryBackendEngine(clean, 'youtube');
+    if (backend) return backend;
 
     const videoId = extractYouTubeId(clean);
     if (!videoId) throw new Error('Could not parse YouTube video ID from URL');
@@ -663,7 +699,7 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     }
 
-    throw new Error('Public YouTube nodes are currently busy. Please run start.bat for instant local extraction.');
+    throw new Error('Public YouTube nodes are currently busy. Please try again in a few moments.');
   };
 
   /**
@@ -672,9 +708,9 @@ document.addEventListener('DOMContentLoaded', () => {
   const extractTikTok = async (url) => {
     const clean = cleanInputUrl(url);
 
-    // Method A: Check local engine first
-    const local = await tryLocalEngine(clean);
-    if (local) return local;
+    // Method A: Check local / Render cloud engine first
+    const backend = await tryBackendEngine(clean, 'tiktok');
+    if (backend) return backend;
 
     try {
       const res = await fetch(`https://www.tikwm.com/api/?url=${encodeURIComponent(clean)}&hd=1`, {
@@ -698,7 +734,7 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     } catch (e) {}
 
-    throw new Error('Unable to extract TikTok video. Please ensure the video is public or run start.bat.');
+    throw new Error('Unable to extract TikTok video. Please ensure the video is public.');
   };
 
   /**
