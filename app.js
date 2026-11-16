@@ -145,6 +145,7 @@ document.addEventListener('DOMContentLoaded', () => {
   };
 
   // Initial check on load
+  const checkLocalEngine = checkEngines;
   checkEngines();
 
   // --- Synchronize Audio & Video for Dual-Stream Playback (YouTube) ---
@@ -776,8 +777,8 @@ document.addEventListener('DOMContentLoaded', () => {
     let lastError = null;
     let result = null;
 
-    // Quick health check on local engine
-    await checkLocalEngine();
+    // Quick health check on local & cloud engine
+    await checkEngines();
 
     while (attempt < MAX_RETRIES) {
       attempt++;
