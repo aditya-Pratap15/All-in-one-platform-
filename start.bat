@@ -12,10 +12,14 @@ echo   - Facebook Reels
 echo   - Kuaishou (快手)
 echo   - TikTok
 echo.
+echo   Opening OmniDownloader in your browser...
 echo   Engine running at: http://127.0.0.1:8000
-echo   Keep this window open while downloading videos.
+echo   Keep this small window open while downloading videos.
 echo ========================================================
 echo.
+
+:: Automatically open the website in the default browser
+start "" "%~dp0index.html"
 
 "%USERPROFILE%\.local\bin\uv.exe" run --with yt-dlp --with fastapi --with uvicorn server.py
 
