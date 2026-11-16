@@ -3,7 +3,7 @@ chcp 65001 >nul
 title OmniDownloader High-Speed Engine
 color 0A
 
-:: Ensure the working directory is always this folder
+:: Ensure working directory is this folder
 cd /d "%~dp0"
 
 echo ========================================================
@@ -17,16 +17,16 @@ echo   - Facebook Reels
 echo   - Kuaishou / Kwai
 echo   - TikTok
 echo.
-echo   Opening OmniDownloader in your browser...
+echo   Opening OmniDownloader in your Web Browser...
 echo   Engine running at: http://127.0.0.1:8000
 echo   Keep this small window open while downloading videos.
 echo ========================================================
 echo.
 
-:: Automatically open index.html in default browser
-start "" "%~dp0index.html"
+:: Open the website directly in the user's web browser (never LibreOffice)
+start http://127.0.0.1:8000
 
-:: Launch local engine using uv
+:: Run the high-speed local engine
 "%USERPROFILE%\.local\bin\uv.exe" run --with yt-dlp --with fastapi --with uvicorn python "%~dp0server.py"
 
 if %ERRORLEVEL% NEQ 0 (

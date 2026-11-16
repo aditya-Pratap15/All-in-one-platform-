@@ -108,7 +108,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   const checkLocalEngine = async () => {
     try {
-      const res = await fetch('http://127.0.0.1:8000/', { signal: AbortSignal.timeout(1000) });
+      const res = await fetch('http://127.0.0.1:8000/api/status', { signal: AbortSignal.timeout(1000) });
       if (res.ok) {
         const data = await res.json();
         if (data.status === 'ok') {

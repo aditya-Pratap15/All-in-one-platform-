@@ -2,15 +2,21 @@
 OmniDownloader High-Speed Local Engine
 Supports YouTube Shorts, Instagram Reels, Facebook Reels, Kuaishou, and TikTok
 Direct stream extraction with 100% success and maximum bitrate.
+Serves full frontend directly on http://127.0.0.1:8000
 """
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 import yt_dlp
 import uvicorn
 import urllib.request
 import re
 import json
+import os
+
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 app = FastAPI(title="OmniDownloader Engine", version="2.0.0")
 
@@ -98,8 +104,10 @@ def extract_kuaishou_direct(url: str):
         }
     raise ValueError("Could not extract Kuaishou video stream")
 
-@app.get("/")
-def health_check():
+# API Endpoints
+@app.get("/api/status")
+@app.get("/health")
+def api_health():
     return {
         "status": "ok",
         "engine": "OmniDownloader High-Speed Engine",
@@ -159,6 +167,26 @@ def extract_video(url: str = Query(..., description="The URL of the video to ext
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
+# Static assets and browser frontend
+if os.path.exists(os.path.join(BASE_DIR, "assets")):
+    app.mount("/assets", StaticFiles(directory=os.path.join(BASE_DIR, "assets")), name="assets")
+
+@app.get("/")
+def serve_index():
+    return FileResponse(os.path.join(BASE_DIR, "index.html"))
+
+@app.get("/app.js")
+def serve_app_js():
+    return FileResponse(os.path.join(BASE_DIR, "app.js"))
+
+@app.get("/style.css")
+def serve_style_css():
+    return FileResponse(os.path.join(BASE_DIR, "style.css"))
+
+@app.get("/favicon.svg")
+def serve_favicon():
+    return FileResponse(os.path.join(BASE_DIR, "favicon.svg"))
+
 if __name__ == "__main__":
-    print("Starting OmniDownloader Engine on http://127.0.0.1:8000 ...")
+    print("OmniDownloader Engine running on http://127.0.0.1:8000 ...")
     uvicorn.run(app, host="127.0.0.1", port=8000)
