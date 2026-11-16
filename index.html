@@ -149,6 +149,10 @@
                 <i data-lucide="clipboard"></i>
                 <span>Paste Links</span>
               </button>
+              <button type="button" class="inline-btn" id="batchFormatBtn" title="Auto-correct & format links into clean rows">
+                <i data-lucide="wand-2"></i>
+                <span>Format Links</span>
+              </button>
               <button type="button" class="inline-btn" id="batchSampleBtn" title="Insert demo links for testing">
                 <i data-lucide="sparkles"></i>
                 <span>Demo Links</span>
@@ -160,12 +164,12 @@
             </div>
           </div>
 
-          <div class="textarea-wrapper">
+          <div class="textarea-wrapper" id="batchTextareaWrapper">
             <textarea 
               id="batchUrlsInput" 
               class="styled-textarea" 
               rows="6" 
-              placeholder="Paste multiple video URLs here (one URL per line)&#10;Supports YouTube Shorts, Instagram Reels, Facebook Reels, Kuaishou, and TikTok:&#10;&#10;https://youtube.com/shorts/...&#10;https://www.facebook.com/share/r/...&#10;https://v.kuaishou.com/..."
+              placeholder="Paste multiple video URLs here in any format:&#10;• With or without commas, spaces, or concatenated together&#10;• With blank lines, bullet points, or mobile share text&#10;URLs will be automatically auto-corrected into clean rows when fetching!&#10;&#10;Supports YouTube Shorts, Instagram Reels, Facebook Reels, Kuaishou, and TikTok"
               spellcheck="false"
             ></textarea>
           </div>

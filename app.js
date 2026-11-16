@@ -50,8 +50,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Batch Mode Elements
   const batchUrlsInput = document.getElementById('batchUrlsInput');
+  const batchTextareaWrapper = document.getElementById('batchTextareaWrapper');
   const batchCountBadge = document.getElementById('batchCountBadge');
   const batchPasteBtn = document.getElementById('batchPasteBtn');
+  const batchFormatBtn = document.getElementById('batchFormatBtn');
   const batchSampleBtn = document.getElementById('batchSampleBtn');
   const batchClearBtn = document.getElementById('batchClearBtn');
   const batchQualitySelect = document.getElementById('batchQualitySelect');
@@ -179,7 +181,7 @@ document.addEventListener('DOMContentLoaded', () => {
     let url = match ? match[0] : raw.trim();
     
     // Strip trailing punctuation often copied from mobile share sheets
-    url = url.replace(/[.,;!?，。！？"'\)\]]+$/, '');
+    url = url.replace(/[.,;!?，。！？"'\)\]>】）]+$/, '');
 
     try {
       const parsed = new URL(url);
@@ -751,13 +753,35 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   };
 
-  // --- Batch Mode Implementation ---
+  // --- Batch Mode Implementation & Format Corrector ---
+  /**
+   * Batch Format Corrector:
+   * Extracts, normalizes, and validates all URLs from user input.
+   * Automatically corrects:
+   * - Glued / concatenated URLs with no space (e.g. "https://url1https://url2")
+   * - Comma, semicolon, pipe, tab, or space-separated URLs
+   * - Numbered or bullet lists ("1. https://...", "- https://...")
+   * - Social share captions with mixed foreign text & emojis
+   * - Trailing commas, punctuation, parentheses, brackets
+   * - Multiple consecutive blank lines
+   * - Strips tracking query params and removes duplicate URLs
+   */
   const parseBatchUrls = (text) => {
     if (!text || typeof text !== 'string') return [];
-    const lines = text.split(/[\r\n]+/);
+
+    // 1. Separate concatenated URLs where http(s) appears immediately after non-whitespace
+    let preprocessed = text.replace(/([^\s])(https?:\/\/)/gi, '$1\n$2');
+
+    // 2. Normalize common delimiters (commas, semicolons, pipes, tabs) into newlines
+    preprocessed = preprocessed.replace(/[,;\|\t]+/g, '\n');
+
+    // 3. Match all URL sequences: http:// or https:// followed by valid URL characters
+    const urlPattern = /https?:\/\/[^\s"'<>,;，；\)\(\]\[`]+/gi;
+    const rawMatches = preprocessed.match(urlPattern) || [];
+
     const extracted = [];
-    for (const line of lines) {
-      const trimmed = line.trim();
+    for (const raw of rawMatches) {
+      let trimmed = raw.replace(/[.,;!?，。！？"'\)\]>】）]+$/, '');
       if (!trimmed) continue;
       const clean = cleanInputUrl(trimmed);
       if (clean && !extracted.includes(clean)) {
@@ -765,6 +789,44 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     }
     return extracted;
+  };
+
+  /**
+   * Auto-corrects the contents of batchUrlsInput into clean, one-URL-per-line format.
+   * Rewrites the textarea, triggers a feedback animation, and returns the array of clean URLs.
+   */
+  const autoCorrectBatchBox = (showFeedback = true) => {
+    if (!batchUrlsInput) return [];
+    const cleanUrls = parseBatchUrls(batchUrlsInput.value);
+
+    if (cleanUrls.length > 0) {
+      const formatted = cleanUrls.join('\n');
+      if (batchUrlsInput.value !== formatted) {
+        batchUrlsInput.value = formatted;
+      }
+      updateBatchCount();
+
+      if (showFeedback) {
+        const wrapper = batchTextareaWrapper || batchUrlsInput.closest('.textarea-wrapper') || batchUrlsInput;
+        wrapper.classList.remove('format-highlight');
+        void wrapper.offsetWidth; // trigger reflow for smooth re-animation
+        wrapper.classList.add('format-highlight');
+        setTimeout(() => wrapper.classList.remove('format-highlight'), 1200);
+
+        if (batchFormatBtn) {
+          const original = `<i data-lucide="wand-2"></i> <span>Format Links</span>`;
+          batchFormatBtn.innerHTML = `<i data-lucide="check"></i> <span>Formatted (${cleanUrls.length})</span>`;
+          if (window.lucide) window.lucide.createIcons();
+          setTimeout(() => {
+            batchFormatBtn.innerHTML = original;
+            if (window.lucide) window.lucide.createIcons();
+          }, 2200);
+        }
+      }
+    } else {
+      updateBatchCount();
+    }
+    return cleanUrls;
   };
 
   const updateBatchCount = () => {
@@ -776,6 +838,20 @@ document.addEventListener('DOMContentLoaded', () => {
   };
 
   batchUrlsInput?.addEventListener('input', updateBatchCount);
+
+  // Auto-correct on paste event
+  batchUrlsInput?.addEventListener('paste', () => {
+    setTimeout(() => {
+      autoCorrectBatchBox(true);
+    }, 60);
+  });
+
+  batchFormatBtn?.addEventListener('click', () => {
+    const urls = autoCorrectBatchBox(true);
+    if (urls.length === 0) {
+      alert('No valid URLs found in the box to format.');
+    }
+  });
 
   batchClearBtn?.addEventListener('click', () => {
     if (batchUrlsInput) batchUrlsInput.value = '';
@@ -791,7 +867,7 @@ document.addEventListener('DOMContentLoaded', () => {
       if (text && batchUrlsInput) {
         const existing = batchUrlsInput.value.trim();
         batchUrlsInput.value = existing ? `${existing}\n${text.trim()}` : text.trim();
-        updateBatchCount();
+        autoCorrectBatchBox(true);
       }
     } catch (e) {
       alert('Please paste your links directly into the batch box.');
@@ -805,7 +881,7 @@ document.addEventListener('DOMContentLoaded', () => {
       'https://youtube.com/shorts/D-OlJCCs-J8',
       'https://v.kuaishou.com/KaLfeAAT'
     ].join('\n');
-    updateBatchCount();
+    autoCorrectBatchBox(true);
   });
 
   // Mode Switch Tabs
@@ -955,7 +1031,8 @@ document.addEventListener('DOMContentLoaded', () => {
   };
 
   const startBatchFetch = async () => {
-    const urls = parseBatchUrls(batchUrlsInput.value);
+    // 1. Auto-correct links inside the batch box into clean format FIRST before processing
+    const urls = autoCorrectBatchBox(true);
     if (urls.length === 0) {
       alert('Please enter at least one valid video URL.');
       return;
