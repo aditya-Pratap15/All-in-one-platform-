@@ -158,36 +158,45 @@ def download_file(
     # 2. If it is already a direct http mp4 stream (e.g. kwimgs.com or direct cdn mp4)
     is_direct_stream = (
         any(k in clean_url.lower() for k in [
-            '.kwimgs.com', '.cdninstagram.com', 'fbcdn.net', 'tiktokcdn.com',
-            'googlevideo.com', 'videoplayback', 'invidious', 'tux.pizza',
-            'nadeko.net', 'nerdvpn.de', 'tiekoetter.com', 'chocolatemoo53.com',
-            'latest_version'
+            '.kwimgs.com', '.cdninstagram.com', 'fbcdn.net', 'tiktokcdn.com'
         ])
-        or (clean_url.startswith('http') and any(ext in clean_url.lower() for ext in ['.mp4', '.m4v', '.mov', '.webm', 'mime=video']))
+        or (clean_url.startswith('http') and any(ext in clean_url.lower() for ext in ['.mp4', '.m4v', '.mov']))
     )
 
     if is_direct_stream:
-        def stream_file():
+        try:
             req = urllib.request.Request(
                 clean_url,
                 headers={
                     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
                 }
             )
-            with urllib.request.urlopen(req, timeout=30) as resp:
-                while True:
-                    chunk = resp.read(64 * 1024)
-                    if not chunk:
-                        break
-                    yield chunk
+            resp = urllib.request.urlopen(req, timeout=15)
+            content_length = resp.headers.get("Content-Length")
 
-        headers = {
-            "Content-Disposition": f'attachment; filename="{clean_filename}"',
-            "Content-Type": "video/mp4",
-            "Access-Control-Allow-Origin": "*",
-            "Access-Control-Expose-Headers": "Content-Disposition"
-        }
-        return StreamingResponse(stream_file(), headers=headers)
+            def stream_file(open_resp):
+                try:
+                    with open_resp:
+                        while True:
+                            chunk = open_resp.read(64 * 1024)
+                            if not chunk:
+                                break
+                            yield chunk
+                except Exception as err:
+                    print("Stream chunk read error:", err)
+
+            headers = {
+                "Content-Disposition": f'attachment; filename="{clean_filename}"',
+                "Content-Type": "video/mp4",
+                "Access-Control-Allow-Origin": "*",
+                "Access-Control-Expose-Headers": "Content-Disposition"
+            }
+            if content_length:
+                headers["Content-Length"] = content_length
+
+            return StreamingResponse(stream_file(resp), headers=headers)
+        except Exception as stream_err:
+            print("Direct stream proxy failed, falling back to yt-dlp:", stream_err)
 
     # 3. Universal yt-dlp download & merge (YouTube Shorts, Instagram Reels, Facebook Reels, TikTok)
     tmp_path = os.path.join(tempfile.gettempdir(), f"omni_{uuid.uuid4().hex}.mp4")

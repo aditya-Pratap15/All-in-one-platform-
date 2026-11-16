@@ -1479,12 +1479,12 @@ document.addEventListener('DOMContentLoaded', () => {
     directDownloadBtn.onclick = () => {
       const filename = getSafeFilename(data.title, 'mp4');
       
-      if (data.preloadedBlob) {
+      if (data.preloadedBlob && data.preloadedBlob.size > 1000) {
         // Instant save from pre-buffered RAM! Zero waiting, zero loading spinner!
         saveBlobLocally(data.preloadedBlob, filename);
         indicateSuccess('Saved to Downloads!');
       } else {
-        // Direct save trigger with sourceUrl and directUrl
+        // Direct save trigger with sourceUrl as priority so backend downloads full video with audio
         triggerFileDownload(data.sourceUrl || data.directUrl, filename, data.directUrl);
       }
     };
@@ -1537,7 +1537,8 @@ document.addEventListener('DOMContentLoaded', () => {
   };
 
   const triggerFileDownload = async (sourceUrl, filename, directUrl = '') => {
-    const targetUrl = directUrl || sourceUrl;
+    // Priority: sourceUrl (page URL for clean full audio/video yt-dlp merge)
+    const targetUrl = sourceUrl || directUrl;
     if (!targetUrl) return;
 
     indicateSuccess('Initiating download...', false);
