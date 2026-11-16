@@ -896,6 +896,7 @@ document.addEventListener('DOMContentLoaded', () => {
         console.warn('Direct pre-buffering skipped (cross-origin streaming enabled):', blobErr);
       }
 
+      result.sourceUrl = cleanUrl;
       displayResult(result, result.platform);
     } catch (err) {
       console.error(err);
@@ -1145,7 +1146,17 @@ document.addEventListener('DOMContentLoaded', () => {
           if (item.data.preloadedBlob) {
             saveBlobLocally(item.data.preloadedBlob, filename);
           } else {
-            triggerFileDownload(item.data.directUrl, filename);
+            const originalHtml = dlBtn.innerHTML;
+            dlBtn.innerHTML = `<i data-lucide="loader-2" class="spin"></i> <span>Downloading...</span>`;
+            if (window.lucide) window.lucide.createIcons();
+            triggerFileDownload(item.data.sourceUrl || item.data.directUrl, filename, item.data.directUrl).finally(() => {
+              dlBtn.innerHTML = `<i data-lucide="check-circle-2"></i> <span>Downloaded</span>`;
+              if (window.lucide) window.lucide.createIcons();
+              setTimeout(() => {
+                dlBtn.innerHTML = originalHtml;
+                if (window.lucide) window.lucide.createIcons();
+              }, 3000);
+            });
           }
         });
 
@@ -1370,7 +1381,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (item.data.preloadedBlob) {
           saveBlobLocally(item.data.preloadedBlob, filename);
         } else {
-          triggerFileDownload(item.data.directUrl, filename);
+          triggerFileDownload(item.data.sourceUrl || item.data.directUrl, filename, item.data.directUrl);
         }
       }, index * 900);
     });
@@ -1452,10 +1463,10 @@ document.addEventListener('DOMContentLoaded', () => {
       if (data.preloadedBlob) {
         // Instant save from pre-buffered RAM! Zero waiting, zero loading spinner!
         saveBlobLocally(data.preloadedBlob, filename);
-        indicateSuccess();
+        indicateSuccess('Saved to Downloads!');
       } else {
-        // Direct save trigger
-        triggerFileDownload(data.directUrl, filename);
+        // Direct save trigger with sourceUrl and directUrl
+        triggerFileDownload(data.sourceUrl || data.directUrl, filename, data.directUrl);
       }
     };
 
@@ -1488,43 +1499,75 @@ document.addEventListener('DOMContentLoaded', () => {
     setTimeout(() => window.URL.revokeObjectURL(blobUrl), 10000);
   };
 
-  const triggerFileDownload = async (url, filename) => {
-    if (!url) return;
+  let indicateTimer = null;
+  const indicateSuccess = (msg = 'Download Started!', keep = false) => {
+    if (!directDownloadBtn) return;
+    if (indicateTimer) clearTimeout(indicateTimer);
+    const originalText = `<i data-lucide="download"></i> <span>Download Video</span>`;
+    const isSpinner = msg.toLowerCase().includes('downloading') || msg.toLowerCase().includes('saving') || msg.toLowerCase().includes('preparing');
+    const icon = isSpinner ? 'loader-2' : 'check-circle-2';
+    const spinClass = isSpinner ? ' class="spin"' : '';
+    directDownloadBtn.innerHTML = `<i data-lucide="${icon}"${spinClass}></i> <span>${msg}</span>`;
+    if (window.lucide) window.lucide.createIcons();
+    if (!keep) {
+      indicateTimer = setTimeout(() => {
+        directDownloadBtn.innerHTML = originalText;
+        if (window.lucide) window.lucide.createIcons();
+      }, 4000);
+    }
+  };
 
-    // 1. Try to fetch as Blob first for clean native saving
+  const triggerFileDownload = async (sourceUrl, filename, directUrl = '') => {
+    if (!sourceUrl && !directUrl) return;
+
+    indicateSuccess('Downloading to your computer...', true);
+
+    const targetUrl = sourceUrl || directUrl;
+
+    // 1. If directUrl is an accessible direct MP4 file (e.g. Kuaishou CDN), try instant blob save
+    if (directUrl && (directUrl.includes('.kwimgs.com') || directUrl.includes('.cdninstagram.com'))) {
+      try {
+        const res = await fetch(directUrl, { referrerPolicy: 'no-referrer' });
+        if (res.ok) {
+          const blob = await res.blob();
+          saveBlobLocally(blob, filename);
+          indicateSuccess('Saved to Downloads!');
+          return;
+        }
+      } catch (e) {
+        console.warn('Direct blob fetch restricted, routing through download engine:', e);
+      }
+    }
+
+    // 2. High-Speed Engine Download Proxy (Local or Render Cloud)
+    await checkEngines();
+    const activeEngineBase = hasLocalEngine ? LOCAL_ENGINE_URL : CLOUD_ENGINE_URL;
+    const downloadProxyUrl = `${activeEngineBase}/api/download-file?url=${encodeURIComponent(targetUrl)}&filename=${encodeURIComponent(filename)}`;
+
     try {
-      const res = await fetch(url, { referrerPolicy: 'no-referrer' });
+      // Fetch blob through our proxy with Content-Disposition
+      const res = await fetch(downloadProxyUrl);
       if (res.ok) {
         const blob = await res.blob();
         saveBlobLocally(blob, filename);
-        indicateSuccess();
+        indicateSuccess('Saved to Downloads!');
         return;
       }
-    } catch (e) {
-      console.warn('Direct blob fetch failed (cross-origin restriction):', e);
+    } catch (err) {
+      console.warn('Proxy blob fetch failed, falling back to native browser attachment:', err);
     }
 
-    // 2. Direct anchor click fallback (target _blank avoids replacing web app window)
+    // 3. Fallback: Native browser attachment trigger (Never opens tab, directly downloads)
     const a = document.createElement('a');
-    a.href = url;
-    a.download = filename;
-    a.target = '_blank';
-    a.rel = 'noopener noreferrer';
+    a.style.display = 'none';
+    a.href = downloadProxyUrl;
+    a.setAttribute('download', filename);
     document.body.appendChild(a);
     a.click();
-    document.body.removeChild(a);
-
-    indicateSuccess('Download link opened! (Press Ctrl+S to save if playing)');
-  };
-
-  const indicateSuccess = (msg = 'Download Started!') => {
-    const originalText = directDownloadBtn.innerHTML;
-    directDownloadBtn.innerHTML = `<i data-lucide="check-circle-2"></i> <span>${msg}</span>`;
-    if (window.lucide) window.lucide.createIcons();
     setTimeout(() => {
-      directDownloadBtn.innerHTML = originalText;
-      if (window.lucide) window.lucide.createIcons();
-    }, 4000);
+      try { document.body.removeChild(a); } catch(err) {}
+    }, 2000);
+    indicateSuccess('Saved to Downloads!');
   };
 
   const getSafeFilename = (title, ext = 'mp4') => {

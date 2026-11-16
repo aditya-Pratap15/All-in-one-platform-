@@ -5,9 +5,9 @@ Direct stream extraction with 100% success and maximum bitrate.
 Serves full frontend directly on http://127.0.0.1:8000
 """
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 import yt_dlp
 import uvicorn
@@ -15,6 +15,8 @@ import urllib.request
 import re
 import json
 import os
+import tempfile
+import uuid
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -114,6 +116,109 @@ def api_health():
         "version": "2.0.0",
         "supported": ["youtube", "instagram", "facebook", "kuaishou", "tiktok"]
     }
+
+def cleanup_temp_file(path: str):
+    try:
+        if os.path.exists(path):
+            os.remove(path)
+    except Exception:
+        pass
+
+@app.get("/api/download-file")
+def download_file(
+    background_tasks: BackgroundTasks,
+    url: str = Query(..., description="Video page URL or direct stream URL"),
+    filename: str = Query("video.mp4")
+):
+    """
+    Downloads and serves the media file with Content-Disposition: attachment header.
+    Forces native browser download directly into user's Downloads folder without opening tabs.
+    For direct streams or Kuaishou, proxies the stream with attachment headers.
+    For YouTube, Facebook, Instagram, TikTok, merges video and audio into a full MP4 file.
+    """
+    clean_filename = re.sub(r'[^a-zA-Z0-9_\-\.]', '_', filename)
+    if not clean_filename.endswith('.mp4') and not clean_filename.endswith('.mp3'):
+        clean_filename += '.mp4'
+
+    clean_url = url.strip()
+
+    # 1. Kuaishou specialized direct extraction
+    if any(k in clean_url.lower() for k in ["kuaishou.com", "kwai.com", "kwai-video.com"]):
+        try:
+            k_info = extract_kuaishou_direct(clean_url)
+            if k_info and k_info.get("url"):
+                clean_url = k_info["url"]
+        except Exception as e:
+            print("Kuaishou extraction for download failed:", e)
+
+    # 2. If it is already a direct http mp4 stream (e.g. kwimgs.com or direct cdn mp4)
+    is_direct_stream = (
+        any(k in clean_url for k in ['.kwimgs.com', '.cdninstagram.com', 'fbcdn.net', 'tiktokcdn.com'])
+        or (clean_url.startswith('http') and '.mp4' in clean_url)
+    )
+
+    if is_direct_stream:
+        def stream_file():
+            req = urllib.request.Request(
+                clean_url,
+                headers={
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+                }
+            )
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                while True:
+                    chunk = resp.read(64 * 1024)
+                    if not chunk:
+                        break
+                    yield chunk
+
+        headers = {
+            "Content-Disposition": f'attachment; filename="{clean_filename}"',
+            "Content-Type": "video/mp4",
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Expose-Headers": "Content-Disposition"
+        }
+        return StreamingResponse(stream_file(), headers=headers)
+
+    # 3. Universal yt-dlp download & merge (YouTube Shorts, Instagram Reels, Facebook Reels, TikTok)
+    tmp_path = os.path.join(tempfile.gettempdir(), f"omni_{uuid.uuid4().hex}.mp4")
+    ydl_opts = {
+        'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
+        'outtmpl': tmp_path,
+        'quiet': True,
+        'no_warnings': True,
+        'noplaylist': True
+    }
+
+    try:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            ydl.download([clean_url])
+
+        if not os.path.exists(tmp_path):
+            base = tmp_path.rsplit('.', 1)[0]
+            for f in os.listdir(tempfile.gettempdir()):
+                if f.startswith(os.path.basename(base)):
+                    tmp_path = os.path.join(tempfile.gettempdir(), f)
+                    break
+
+        if not os.path.exists(tmp_path):
+            raise HTTPException(status_code=500, detail="Failed to assemble downloaded video file.")
+
+        background_tasks.add_task(cleanup_temp_file, tmp_path)
+        return FileResponse(
+            path=tmp_path,
+            filename=clean_filename,
+            media_type="video/mp4",
+            headers={
+                "Content-Disposition": f'attachment; filename="{clean_filename}"',
+                "Access-Control-Allow-Origin": "*",
+                "Access-Control-Expose-Headers": "Content-Disposition"
+            }
+        )
+    except Exception as e:
+        print("yt-dlp download error:", e)
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 @app.get("/download")
 def extract_video(url: str = Query(..., description="The URL of the video to extract")):
