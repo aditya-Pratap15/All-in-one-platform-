@@ -95,6 +95,9 @@ document.addEventListener('DOMContentLoaded', () => {
   let currentMode = 'single';
   let batchItems = [];
   let isLocalEngineOnline = false;
+  let isCloudEngineOnline = false;
+  let hasLocalEngine = false;
+  let hasCloudEngine = false;
 
   const updateEngineStatusUI = (isLocal, isCloud = true) => {
     if (!engineStatusPill || !engineStatusText) return;
@@ -121,6 +124,9 @@ document.addEventListener('DOMContentLoaded', () => {
         const data = await res.json();
         if (data.status === 'ok') {
           isLocalEngineOnline = true;
+          hasLocalEngine = true;
+          isCloudEngineOnline = false;
+          hasCloudEngine = false;
           updateEngineStatusUI(true, false);
           return;
         }
@@ -128,6 +134,7 @@ document.addEventListener('DOMContentLoaded', () => {
     } catch (e) {}
 
     isLocalEngineOnline = false;
+    hasLocalEngine = false;
 
     // 2. Check 24/7 Render cloud engine
     try {
@@ -135,12 +142,16 @@ document.addEventListener('DOMContentLoaded', () => {
       if (res.ok) {
         const data = await res.json();
         if (data.status === 'ok') {
+          isCloudEngineOnline = true;
+          hasCloudEngine = true;
           updateEngineStatusUI(false, true);
           return;
         }
       }
     } catch (e) {}
 
+    isCloudEngineOnline = false;
+    hasCloudEngine = false;
     updateEngineStatusUI(false, false);
   };
 
@@ -1524,67 +1535,51 @@ document.addEventListener('DOMContentLoaded', () => {
   const triggerFileDownload = async (sourceUrl, filename, directUrl = '') => {
     if (!sourceUrl && !directUrl) return;
 
-    indicateSuccess('Downloading to your computer...', true);
+    indicateSuccess('Initiating download...', false);
 
     const isYouTube = (sourceUrl && (sourceUrl.includes('youtube.com') || sourceUrl.includes('youtu.be')));
 
     // 1. If Local Engine is running (start.bat), use local engine for 100% full quality & audio
     await checkEngines();
-    if (hasLocalEngine) {
+    if (isLocalEngineOnline || hasLocalEngine) {
       const targetUrl = sourceUrl || directUrl;
       const downloadProxyUrl = `${LOCAL_ENGINE_URL}/api/download-file?url=${encodeURIComponent(targetUrl)}&filename=${encodeURIComponent(filename)}`;
 
-      try {
-        const ctrl = new AbortController();
-        const tid = setTimeout(() => ctrl.abort(), 60000);
-        const res = await fetch(downloadProxyUrl, { signal: ctrl.signal });
-        clearTimeout(tid);
-        if (res.ok) {
-          const blob = await res.blob();
-          saveBlobLocally(blob, filename);
-          indicateSuccess('Saved to Downloads!');
-          return;
-        }
-      } catch (err) {
-        console.warn('Local engine fetch error, triggering attachment link:', err.message);
-      }
-
-      // Fallback: browser attachment link to local proxy
+      // Direct native browser download via link with Content-Disposition
+      // The browser's native download manager immediately takes over and streams straight to Downloads!
       const a = document.createElement('a');
       a.href = downloadProxyUrl;
       a.setAttribute('download', filename);
       document.body.appendChild(a);
       a.click();
       setTimeout(() => {
-        try { document.body.removeChild(a); } catch(e) {}
-      }, 2000);
-      indicateSuccess('Saved to Downloads!');
+        try { document.body.removeChild(a); } catch (e) {}
+      }, 1000);
+
+      indicateSuccess('Download started in browser!');
       return;
     }
 
-    // 2. If online on Cloud Engine (Render.com) - Works for Kuaishou, Instagram, Facebook, TikTok
-    if (hasCloudEngine && !isYouTube) {
+    // 2. If online on Cloud Engine (Render.com) - For Kuaishou, Instagram, Facebook, TikTok
+    if ((isCloudEngineOnline || hasCloudEngine) && !isYouTube) {
       const targetUrl = directUrl || sourceUrl;
       const downloadProxyUrl = `${CLOUD_ENGINE_URL}/api/download-file?url=${encodeURIComponent(targetUrl)}&filename=${encodeURIComponent(filename)}`;
 
-      try {
-        const ctrl = new AbortController();
-        const tid = setTimeout(() => ctrl.abort(), 20000);
-        const res = await fetch(downloadProxyUrl, { signal: ctrl.signal });
-        clearTimeout(tid);
-        if (res.ok) {
-          const blob = await res.blob();
-          saveBlobLocally(blob, filename);
-          indicateSuccess('Saved to Downloads!');
-          return;
-        }
-      } catch (err) {
-        console.warn('Cloud proxy blob fetch failed, falling back:', err.message);
-      }
+      const a = document.createElement('a');
+      a.href = downloadProxyUrl;
+      a.setAttribute('download', filename);
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(() => {
+        try { document.body.removeChild(a); } catch (e) {}
+      }, 1000);
+
+      indicateSuccess('Download started in browser!');
+      return;
     }
 
     // 3. Direct blob save from directUrl (for Kuaishou or CORS streams)
-    if (directUrl) {
+    if (directUrl && !isYouTube) {
       try {
         const ctrl = new AbortController();
         const tid = setTimeout(() => ctrl.abort(), 7000);
@@ -1599,7 +1594,7 @@ document.addEventListener('DOMContentLoaded', () => {
       } catch (e) {}
     }
 
-    // 4. Native Browser Fallback (Never hangs)
+    // 4. Fallback: Browser native anchor click directly to the stream (Never hangs)
     const fallbackUrl = directUrl || sourceUrl;
     if (fallbackUrl) {
       const a = document.createElement('a');
@@ -1613,8 +1608,8 @@ document.addEventListener('DOMContentLoaded', () => {
         try { document.body.removeChild(a); } catch(e) {}
       }, 1500);
 
-      if (isYouTube && !hasLocalEngine) {
-        indicateSuccess('Opening stream... (Tip: Run start.bat for merged MP4)');
+      if (isYouTube && !isLocalEngineOnline) {
+        indicateSuccess('Opening stream... (For 100% merged sound, run start.bat)');
       } else {
         indicateSuccess('Download link triggered!');
       }
