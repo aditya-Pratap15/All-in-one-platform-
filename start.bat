@@ -1,6 +1,11 @@
 @echo off
+chcp 65001 >nul
 title OmniDownloader High-Speed Engine
 color 0A
+
+:: Ensure the working directory is always this folder
+cd /d "%~dp0"
+
 echo ========================================================
 echo        OmniDownloader High-Speed Local Engine
 echo ========================================================
@@ -9,7 +14,7 @@ echo   Supports 100%% unrestricted instant downloads for:
 echo   - YouTube Shorts
 echo   - Instagram Reels
 echo   - Facebook Reels
-echo   - Kuaishou (快手)
+echo   - Kuaishou / Kwai
 echo   - TikTok
 echo.
 echo   Opening OmniDownloader in your browser...
@@ -18,15 +23,15 @@ echo   Keep this small window open while downloading videos.
 echo ========================================================
 echo.
 
-:: Automatically open the website in the default browser
+:: Automatically open index.html in default browser
 start "" "%~dp0index.html"
 
-"%USERPROFILE%\.local\bin\uv.exe" run --with yt-dlp --with fastapi --with uvicorn server.py
+:: Launch local engine using uv
+"%USERPROFILE%\.local\bin\uv.exe" run --with yt-dlp --with fastapi --with uvicorn python "%~dp0server.py"
 
 if %ERRORLEVEL% NEQ 0 (
     echo.
-    echo Trying fallback with system python...
-    python server.py
+    echo High-speed engine stopped.
 )
 
 pause
