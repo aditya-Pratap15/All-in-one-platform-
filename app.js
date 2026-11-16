@@ -84,7 +84,8 @@ document.addEventListener('DOMContentLoaded', () => {
   const engineDot = document.getElementById('engineDot');
   const engineStatusText = document.getElementById('engineStatusText');
 
-  // Dedicated 24/7 Render Cloud Engine
+  // Engine Endpoints
+  const LOCAL_ENGINE_URL = 'http://127.0.0.1:8000';
   const CLOUD_ENGINE_URL = 'https://omni-downloader-kb73.onrender.com';
 
   // State
@@ -1537,18 +1538,18 @@ document.addEventListener('DOMContentLoaded', () => {
   };
 
   const triggerFileDownload = async (sourceUrl, filename, directUrl = '') => {
-    // Priority: sourceUrl (page URL for clean full audio/video yt-dlp merge)
-    const targetUrl = sourceUrl || directUrl;
-    if (!targetUrl) return;
+    if (!sourceUrl && !directUrl) return;
 
     indicateSuccess('Initiating download...', false);
 
-    await checkEngines();
-    const activeEngineBase = isLocalEngineOnline ? LOCAL_ENGINE_URL : (isCloudEngineOnline ? CLOUD_ENGINE_URL : '');
+    const isYouTube = (sourceUrl && (sourceUrl.includes('youtube.com') || sourceUrl.includes('youtu.be')));
 
-    // 1. If Local or Cloud Engine is active, trigger instant native browser download with attachment header
-    if (activeEngineBase) {
-      const downloadProxyUrl = `${activeEngineBase}/api/download-file?url=${encodeURIComponent(targetUrl)}&filename=${encodeURIComponent(filename)}`;
+    await checkEngines();
+
+    // 1. If Local Engine is running (start.bat on PC): works 100% for all platforms including YouTube
+    if (isLocalEngineOnline) {
+      const targetUrl = sourceUrl || directUrl;
+      const downloadProxyUrl = `${LOCAL_ENGINE_URL}/api/download-file?url=${encodeURIComponent(targetUrl)}&filename=${encodeURIComponent(filename)}`;
 
       const a = document.createElement('a');
       a.href = downloadProxyUrl;
@@ -1563,9 +1564,48 @@ document.addEventListener('DOMContentLoaded', () => {
       return;
     }
 
-    // 2. Direct browser stream link fallback
+    // 2. If online on 24/7 Cloud Engine (Render.com): Works for Instagram, Facebook, TikTok, Kuaishou
+    // (Never send YouTube to Render, as YouTube blocks cloud datacenter IPs)
+    if (isCloudEngineOnline && !isYouTube) {
+      const targetUrl = sourceUrl || directUrl;
+      const downloadProxyUrl = `${CLOUD_ENGINE_URL}/api/download-file?url=${encodeURIComponent(targetUrl)}&filename=${encodeURIComponent(filename)}`;
+
+      const a = document.createElement('a');
+      a.href = downloadProxyUrl;
+      a.setAttribute('download', filename);
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(() => {
+        try { document.body.removeChild(a); } catch (e) {}
+      }, 1000);
+
+      indicateSuccess('Download started in browser!');
+      return;
+    }
+
+    // 3. YouTube on GitHub Pages without start.bat:
+    // Download direct stream directly in browser without calling Render
+    if (isYouTube) {
+      const streamUrl = directUrl || sourceUrl;
+      const a = document.createElement('a');
+      a.href = streamUrl;
+      a.setAttribute('download', filename);
+      a.target = '_blank';
+      a.rel = 'noopener noreferrer';
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(() => {
+        try { document.body.removeChild(a); } catch (e) {}
+      }, 1000);
+
+      indicateSuccess('Opening stream... (Run start.bat on PC for merged audio MP4)');
+      return;
+    }
+
+    // 4. Fallback for any other platform
+    const fallbackUrl = directUrl || sourceUrl;
     const a = document.createElement('a');
-    a.href = targetUrl;
+    a.href = fallbackUrl;
     a.setAttribute('download', filename);
     a.target = '_blank';
     a.rel = 'noopener noreferrer';

@@ -201,7 +201,8 @@ def download_file(
     # 3. Universal yt-dlp download & merge (YouTube Shorts, Instagram Reels, Facebook Reels, TikTok)
     tmp_path = os.path.join(tempfile.gettempdir(), f"omni_{uuid.uuid4().hex}.mp4")
     ydl_opts = {
-        'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
+        'format': 'bestvideo*+bestaudio/best[acodec!=none]/best',
+        'merge_output_format': 'mp4',
         'outtmpl': tmp_path,
         'quiet': True,
         'no_warnings': True,
