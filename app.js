@@ -1543,13 +1543,13 @@ document.addEventListener('DOMContentLoaded', () => {
     indicateSuccess('Initiating download...', false);
 
     await checkEngines();
-    const activeEngineBase = isLocalEngineOnline ? LOCAL_ENGINE_URL : (isCloudEngineOnline ? CLOUD_ENGINE_URL : '');
+    const isYouTube = (sourceUrl && (sourceUrl.includes('youtube.com') || sourceUrl.includes('youtu.be')));
 
-    // 1. Primary Method (Same for ALL platforms: YouTube, Instagram, Facebook, TikTok, Kuaishou):
-    // Uses the engine to merge full audio+video into a clean MP4 with Content-Disposition: attachment
-    if (activeEngineBase) {
+    // 1. If Local Engine is running (start.bat on PC):
+    // Downloads 100% full merged audio+video for ALL platforms including YouTube
+    if (isLocalEngineOnline) {
       const targetUrl = sourceUrl || directUrl;
-      const downloadProxyUrl = `${activeEngineBase}/api/download-file?url=${encodeURIComponent(targetUrl)}&filename=${encodeURIComponent(filename)}`;
+      const downloadProxyUrl = `${LOCAL_ENGINE_URL}/api/download-file?url=${encodeURIComponent(targetUrl)}&filename=${encodeURIComponent(filename)}`;
 
       const a = document.createElement('a');
       a.href = downloadProxyUrl;
@@ -1564,7 +1564,34 @@ document.addEventListener('DOMContentLoaded', () => {
       return;
     }
 
-    // 2. Direct in-memory blob saving fallback (Zero tabs, zero page navigation):
+    // 2. If online on 24/7 Cloud Engine (Render.com) & NOT YouTube:
+    // Works for Instagram, Facebook, TikTok, Kuaishou
+    if (isCloudEngineOnline && !isYouTube) {
+      const targetUrl = sourceUrl || directUrl;
+      const downloadProxyUrl = `${CLOUD_ENGINE_URL}/api/download-file?url=${encodeURIComponent(targetUrl)}&filename=${encodeURIComponent(filename)}`;
+
+      const a = document.createElement('a');
+      a.href = downloadProxyUrl;
+      a.setAttribute('download', filename);
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(() => {
+        try { document.body.removeChild(a); } catch (e) {}
+      }, 1000);
+
+      indicateSuccess('Download started in browser!');
+      return;
+    }
+
+    // 3. YouTube when Local Engine is NOT running:
+    // Never send YouTube to Render (prevents the 500 error page). Prompt user to open start.bat
+    if (isYouTube && !isLocalEngineOnline) {
+      indicateSuccess('Start start.bat on PC for YouTube!', false);
+      alert('To download YouTube videos with complete merged audio without bot blocks:\n\nPlease run start.bat in your D:\\all-in-one-downloader folder (or visit http://127.0.0.1:8000).\n\nThe engine is already ready to download all your YouTube videos instantly!');
+      return;
+    }
+
+    // 4. Direct in-memory blob saving fallback:
     const streamUrl = directUrl || sourceUrl;
     if (streamUrl) {
       try {
@@ -1582,7 +1609,7 @@ document.addEventListener('DOMContentLoaded', () => {
         console.warn('Direct stream blob fetch bypassed:', e);
       }
 
-      // Hidden iframe fallback (Triggers download without ever navigating away from the page)
+      // Hidden iframe fallback (Triggers download without navigating away)
       const iframe = document.createElement('iframe');
       iframe.style.display = 'none';
       iframe.src = streamUrl;
