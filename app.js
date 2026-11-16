@@ -1583,39 +1583,39 @@ document.addEventListener('DOMContentLoaded', () => {
       return;
     }
 
-    // 3. YouTube on GitHub Pages without start.bat:
-    // Download direct stream directly in browser without calling Render
-    if (isYouTube) {
-      const streamUrl = directUrl || sourceUrl;
+    // 3. Direct In-Browser Download (YouTube on GitHub Pages or Direct Stream):
+    // Use the exact same zero-tab blob saving technique used for instant saving
+    const streamUrl = directUrl || sourceUrl;
+    if (streamUrl) {
+      // First attempt: Fast in-memory blob fetch & save (guaranteed NO new tab)
+      try {
+        indicateSuccess('Saving video to computer...', true);
+        const res = await fetch(streamUrl, { referrerPolicy: 'no-referrer' });
+        if (res.ok) {
+          const blob = await res.blob();
+          if (blob && blob.size > 1000) {
+            saveBlobLocally(blob, filename);
+            indicateSuccess('Saved to Downloads!');
+            return;
+          }
+        }
+      } catch (e) {
+        console.warn('Direct stream blob fetch bypassed (using direct download anchor):', e);
+      }
+
+      // Second attempt: Native anchor click (NO target="_blank" so it never opens a new tab)
       const a = document.createElement('a');
       a.href = streamUrl;
       a.setAttribute('download', filename);
-      a.target = '_blank';
-      a.rel = 'noopener noreferrer';
       document.body.appendChild(a);
       a.click();
       setTimeout(() => {
         try { document.body.removeChild(a); } catch (e) {}
       }, 1000);
 
-      indicateSuccess('Opening stream... (Run start.bat on PC for merged audio MP4)');
+      indicateSuccess('Download started in browser!');
       return;
     }
-
-    // 4. Fallback for any other platform
-    const fallbackUrl = directUrl || sourceUrl;
-    const a = document.createElement('a');
-    a.href = fallbackUrl;
-    a.setAttribute('download', filename);
-    a.target = '_blank';
-    a.rel = 'noopener noreferrer';
-    document.body.appendChild(a);
-    a.click();
-    setTimeout(() => {
-      try { document.body.removeChild(a); } catch (e) {}
-    }, 1000);
-
-    indicateSuccess('Download started in browser!');
   };
 
   const getSafeFilename = (title, ext = 'mp4') => {
