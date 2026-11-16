@@ -1542,14 +1542,14 @@ document.addEventListener('DOMContentLoaded', () => {
 
     indicateSuccess('Initiating download...', false);
 
-    const isYouTube = (sourceUrl && (sourceUrl.includes('youtube.com') || sourceUrl.includes('youtu.be')));
-
     await checkEngines();
+    const activeEngineBase = isLocalEngineOnline ? LOCAL_ENGINE_URL : (isCloudEngineOnline ? CLOUD_ENGINE_URL : '');
 
-    // 1. If Local Engine is running (start.bat on PC): works 100% for all platforms including YouTube
-    if (isLocalEngineOnline) {
+    // 1. Primary Method (Same for ALL platforms: YouTube, Instagram, Facebook, TikTok, Kuaishou):
+    // Uses the engine to merge full audio+video into a clean MP4 with Content-Disposition: attachment
+    if (activeEngineBase) {
       const targetUrl = sourceUrl || directUrl;
-      const downloadProxyUrl = `${LOCAL_ENGINE_URL}/api/download-file?url=${encodeURIComponent(targetUrl)}&filename=${encodeURIComponent(filename)}`;
+      const downloadProxyUrl = `${activeEngineBase}/api/download-file?url=${encodeURIComponent(targetUrl)}&filename=${encodeURIComponent(filename)}`;
 
       const a = document.createElement('a');
       a.href = downloadProxyUrl;
@@ -1564,30 +1564,9 @@ document.addEventListener('DOMContentLoaded', () => {
       return;
     }
 
-    // 2. If online on 24/7 Cloud Engine (Render.com): Works for Instagram, Facebook, TikTok, Kuaishou
-    // (Never send YouTube to Render, as YouTube blocks cloud datacenter IPs)
-    if (isCloudEngineOnline && !isYouTube) {
-      const targetUrl = sourceUrl || directUrl;
-      const downloadProxyUrl = `${CLOUD_ENGINE_URL}/api/download-file?url=${encodeURIComponent(targetUrl)}&filename=${encodeURIComponent(filename)}`;
-
-      const a = document.createElement('a');
-      a.href = downloadProxyUrl;
-      a.setAttribute('download', filename);
-      document.body.appendChild(a);
-      a.click();
-      setTimeout(() => {
-        try { document.body.removeChild(a); } catch (e) {}
-      }, 1000);
-
-      indicateSuccess('Download started in browser!');
-      return;
-    }
-
-    // 3. Direct In-Browser Download (YouTube on GitHub Pages or Direct Stream):
-    // Use the exact same zero-tab blob saving technique used for instant saving
+    // 2. Direct in-memory blob saving fallback (Zero tabs, zero page navigation):
     const streamUrl = directUrl || sourceUrl;
     if (streamUrl) {
-      // First attempt: Fast in-memory blob fetch & save (guaranteed NO new tab)
       try {
         indicateSuccess('Saving video to computer...', true);
         const res = await fetch(streamUrl, { referrerPolicy: 'no-referrer' });
@@ -1600,18 +1579,17 @@ document.addEventListener('DOMContentLoaded', () => {
           }
         }
       } catch (e) {
-        console.warn('Direct stream blob fetch bypassed (using direct download anchor):', e);
+        console.warn('Direct stream blob fetch bypassed:', e);
       }
 
-      // Second attempt: Native anchor click (NO target="_blank" so it never opens a new tab)
-      const a = document.createElement('a');
-      a.href = streamUrl;
-      a.setAttribute('download', filename);
-      document.body.appendChild(a);
-      a.click();
+      // Hidden iframe fallback (Triggers download without ever navigating away from the page)
+      const iframe = document.createElement('iframe');
+      iframe.style.display = 'none';
+      iframe.src = streamUrl;
+      document.body.appendChild(iframe);
       setTimeout(() => {
-        try { document.body.removeChild(a); } catch (e) {}
-      }, 1000);
+        try { document.body.removeChild(iframe); } catch (e) {}
+      }, 15000);
 
       indicateSuccess('Download started in browser!');
       return;
