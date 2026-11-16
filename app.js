@@ -1518,16 +1518,18 @@ document.addEventListener('DOMContentLoaded', () => {
   };
 
   const triggerFileDownload = async (sourceUrl, filename, directUrl = '') => {
-    if (!sourceUrl && !directUrl) return;
+    const targetUrl = directUrl || sourceUrl;
+    if (!targetUrl) return;
 
     indicateSuccess('Downloading to your computer...', true);
 
-    const targetUrl = sourceUrl || directUrl;
-
-    // 1. If directUrl is an accessible direct MP4 file (e.g. Kuaishou CDN), try instant blob save
-    if (directUrl && (directUrl.includes('.kwimgs.com') || directUrl.includes('.cdninstagram.com'))) {
+    // 1. Try direct fetch as blob first (Instant save for Kuaishou, Invidious, and any CORS-open stream)
+    if (directUrl) {
       try {
-        const res = await fetch(directUrl, { referrerPolicy: 'no-referrer' });
+        const ctrl = new AbortController();
+        const tid = setTimeout(() => ctrl.abort(), 7000);
+        const res = await fetch(directUrl, { signal: ctrl.signal, referrerPolicy: 'no-referrer' });
+        clearTimeout(tid);
         if (res.ok) {
           const blob = await res.blob();
           saveBlobLocally(blob, filename);
@@ -1535,39 +1537,64 @@ document.addEventListener('DOMContentLoaded', () => {
           return;
         }
       } catch (e) {
-        console.warn('Direct blob fetch restricted, routing through download engine:', e);
+        console.warn('Direct blob fetch skipped, routing through engine download proxy:', e.message);
       }
     }
 
     // 2. High-Speed Engine Download Proxy (Local or Render Cloud)
     await checkEngines();
-    const activeEngineBase = hasLocalEngine ? LOCAL_ENGINE_URL : CLOUD_ENGINE_URL;
-    const downloadProxyUrl = `${activeEngineBase}/api/download-file?url=${encodeURIComponent(targetUrl)}&filename=${encodeURIComponent(filename)}`;
+    const activeEngineBase = hasLocalEngine ? LOCAL_ENGINE_URL : (hasCloudEngine ? CLOUD_ENGINE_URL : '');
 
-    try {
-      // Fetch blob through our proxy with Content-Disposition
-      const res = await fetch(downloadProxyUrl);
-      if (res.ok) {
-        const blob = await res.blob();
-        saveBlobLocally(blob, filename);
+    if (activeEngineBase) {
+      const downloadProxyUrl = `${activeEngineBase}/api/download-file?url=${encodeURIComponent(targetUrl)}&filename=${encodeURIComponent(filename)}`;
+
+      try {
+        const ctrl = new AbortController();
+        const tid = setTimeout(() => ctrl.abort(), 12000);
+        const res = await fetch(downloadProxyUrl, { signal: ctrl.signal });
+        clearTimeout(tid);
+        if (res.ok) {
+          const blob = await res.blob();
+          saveBlobLocally(blob, filename);
+          indicateSuccess('Saved to Downloads!');
+          return;
+        }
+      } catch (err) {
+        console.warn('Proxy blob fetch failed, triggering native browser attachment link:', err.message);
+      }
+
+      // If backend blob fetch was restricted, trigger browser attachment directly to proxy
+      try {
+        const iframe = document.createElement('iframe');
+        iframe.style.display = 'none';
+        iframe.src = downloadProxyUrl;
+        document.body.appendChild(iframe);
+        setTimeout(() => {
+          try { document.body.removeChild(iframe); } catch(err) {}
+        }, 12000);
         indicateSuccess('Saved to Downloads!');
         return;
-      }
-    } catch (err) {
-      console.warn('Proxy blob fetch failed, falling back to native browser attachment:', err);
+      } catch (e) {}
     }
 
-    // 3. Fallback: Native browser attachment trigger (Never opens tab, directly downloads)
-    const a = document.createElement('a');
-    a.style.display = 'none';
-    a.href = downloadProxyUrl;
-    a.setAttribute('download', filename);
-    document.body.appendChild(a);
-    a.click();
-    setTimeout(() => {
-      try { document.body.removeChild(a); } catch(err) {}
-    }, 2000);
-    indicateSuccess('Saved to Downloads!');
+    // 3. Fallback: Browser native anchor click directly to the stream (Never hangs)
+    const fallbackUrl = directUrl || targetUrl;
+    if (fallbackUrl) {
+      const a = document.createElement('a');
+      a.href = fallbackUrl;
+      a.setAttribute('download', filename);
+      a.target = '_blank';
+      a.rel = 'noopener noreferrer';
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(() => {
+        try { document.body.removeChild(a); } catch(e) {}
+      }, 1500);
+      indicateSuccess('Download link triggered!');
+      return;
+    }
+
+    indicateSuccess('Download failed. Please copy link.');
   };
 
   const getSafeFilename = (title, ext = 'mp4') => {

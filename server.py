@@ -153,8 +153,13 @@ def download_file(
 
     # 2. If it is already a direct http mp4 stream (e.g. kwimgs.com or direct cdn mp4)
     is_direct_stream = (
-        any(k in clean_url for k in ['.kwimgs.com', '.cdninstagram.com', 'fbcdn.net', 'tiktokcdn.com'])
-        or (clean_url.startswith('http') and '.mp4' in clean_url)
+        any(k in clean_url.lower() for k in [
+            '.kwimgs.com', '.cdninstagram.com', 'fbcdn.net', 'tiktokcdn.com',
+            'googlevideo.com', 'videoplayback', 'invidious', 'tux.pizza',
+            'nadeko.net', 'nerdvpn.de', 'tiekoetter.com', 'chocolatemoo53.com',
+            'latest_version'
+        ])
+        or (clean_url.startswith('http') and any(ext in clean_url.lower() for ext in ['.mp4', '.m4v', '.mov', '.webm', 'mime=video']))
     )
 
     if is_direct_stream:
