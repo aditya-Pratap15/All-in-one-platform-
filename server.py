@@ -141,6 +141,10 @@ def download_file(
         clean_filename += '.mp4'
 
     clean_url = url.strip()
+    if "youtube.com" in clean_url or "youtu.be" in clean_url:
+        m = re.search(r'(?:v=|\/shorts\/|youtu\.be\/)([a-zA-Z0-9_-]{11})', clean_url)
+        if m:
+            clean_url = f"https://www.youtube.com/watch?v={m.group(1)}"
 
     # 1. Kuaishou specialized direct extraction
     if any(k in clean_url.lower() for k in ["kuaishou.com", "kwai.com", "kwai-video.com"]):
@@ -228,6 +232,10 @@ def download_file(
 @app.get("/download")
 def extract_video(url: str = Query(..., description="The URL of the video to extract")):
     clean_url = url.strip()
+    if "youtube.com" in clean_url or "youtu.be" in clean_url:
+        m = re.search(r'(?:v=|\/shorts\/|youtu\.be\/)([a-zA-Z0-9_-]{11})', clean_url)
+        if m:
+            clean_url = f"https://www.youtube.com/watch?v={m.group(1)}"
 
     # 1. Kuaishou specialized direct extraction
     if any(k in clean_url.lower() for k in ["kuaishou.com", "kwai.com", "kwai-video.com"]):

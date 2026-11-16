@@ -250,11 +250,15 @@ document.addEventListener('DOMContentLoaded', () => {
         return parsed.toString();
       }
       if (parsed.hostname.includes('youtube.com') || parsed.hostname.includes('youtu.be')) {
+        let v = '';
         if (parsed.pathname.includes('/shorts/')) {
-          parsed.search = '';
+          const m = parsed.pathname.match(/\/shorts\/([a-zA-Z0-9_-]{11})/);
+          if (m) v = m[1];
         } else if (parsed.searchParams.has('v')) {
-          const v = parsed.searchParams.get('v');
-          parsed.search = `?v=${v}`;
+          v = parsed.searchParams.get('v');
+        }
+        if (v) {
+          return `https://www.youtube.com/watch?v=${v}`;
         }
         return parsed.toString();
       }
@@ -1518,12 +1522,68 @@ document.addEventListener('DOMContentLoaded', () => {
   };
 
   const triggerFileDownload = async (sourceUrl, filename, directUrl = '') => {
-    const targetUrl = directUrl || sourceUrl;
-    if (!targetUrl) return;
+    if (!sourceUrl && !directUrl) return;
 
     indicateSuccess('Downloading to your computer...', true);
 
-    // 1. Try direct fetch as blob first (Instant save for Kuaishou, Invidious, and any CORS-open stream)
+    const isYouTube = (sourceUrl && (sourceUrl.includes('youtube.com') || sourceUrl.includes('youtu.be')));
+
+    // 1. If Local Engine is running (start.bat), use local engine for 100% full quality & audio
+    await checkEngines();
+    if (hasLocalEngine) {
+      const targetUrl = sourceUrl || directUrl;
+      const downloadProxyUrl = `${LOCAL_ENGINE_URL}/api/download-file?url=${encodeURIComponent(targetUrl)}&filename=${encodeURIComponent(filename)}`;
+
+      try {
+        const ctrl = new AbortController();
+        const tid = setTimeout(() => ctrl.abort(), 60000);
+        const res = await fetch(downloadProxyUrl, { signal: ctrl.signal });
+        clearTimeout(tid);
+        if (res.ok) {
+          const blob = await res.blob();
+          saveBlobLocally(blob, filename);
+          indicateSuccess('Saved to Downloads!');
+          return;
+        }
+      } catch (err) {
+        console.warn('Local engine fetch error, triggering attachment link:', err.message);
+      }
+
+      // Fallback: browser attachment link to local proxy
+      const a = document.createElement('a');
+      a.href = downloadProxyUrl;
+      a.setAttribute('download', filename);
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(() => {
+        try { document.body.removeChild(a); } catch(e) {}
+      }, 2000);
+      indicateSuccess('Saved to Downloads!');
+      return;
+    }
+
+    // 2. If online on Cloud Engine (Render.com) - Works for Kuaishou, Instagram, Facebook, TikTok
+    if (hasCloudEngine && !isYouTube) {
+      const targetUrl = directUrl || sourceUrl;
+      const downloadProxyUrl = `${CLOUD_ENGINE_URL}/api/download-file?url=${encodeURIComponent(targetUrl)}&filename=${encodeURIComponent(filename)}`;
+
+      try {
+        const ctrl = new AbortController();
+        const tid = setTimeout(() => ctrl.abort(), 20000);
+        const res = await fetch(downloadProxyUrl, { signal: ctrl.signal });
+        clearTimeout(tid);
+        if (res.ok) {
+          const blob = await res.blob();
+          saveBlobLocally(blob, filename);
+          indicateSuccess('Saved to Downloads!');
+          return;
+        }
+      } catch (err) {
+        console.warn('Cloud proxy blob fetch failed, falling back:', err.message);
+      }
+    }
+
+    // 3. Direct blob save from directUrl (for Kuaishou or CORS streams)
     if (directUrl) {
       try {
         const ctrl = new AbortController();
@@ -1536,49 +1596,11 @@ document.addEventListener('DOMContentLoaded', () => {
           indicateSuccess('Saved to Downloads!');
           return;
         }
-      } catch (e) {
-        console.warn('Direct blob fetch skipped, routing through engine download proxy:', e.message);
-      }
-    }
-
-    // 2. High-Speed Engine Download Proxy (Local or Render Cloud)
-    await checkEngines();
-    const activeEngineBase = hasLocalEngine ? LOCAL_ENGINE_URL : (hasCloudEngine ? CLOUD_ENGINE_URL : '');
-
-    if (activeEngineBase) {
-      const downloadProxyUrl = `${activeEngineBase}/api/download-file?url=${encodeURIComponent(targetUrl)}&filename=${encodeURIComponent(filename)}`;
-
-      try {
-        const ctrl = new AbortController();
-        const tid = setTimeout(() => ctrl.abort(), 12000);
-        const res = await fetch(downloadProxyUrl, { signal: ctrl.signal });
-        clearTimeout(tid);
-        if (res.ok) {
-          const blob = await res.blob();
-          saveBlobLocally(blob, filename);
-          indicateSuccess('Saved to Downloads!');
-          return;
-        }
-      } catch (err) {
-        console.warn('Proxy blob fetch failed, triggering native browser attachment link:', err.message);
-      }
-
-      // If backend blob fetch was restricted, trigger browser attachment directly to proxy
-      try {
-        const iframe = document.createElement('iframe');
-        iframe.style.display = 'none';
-        iframe.src = downloadProxyUrl;
-        document.body.appendChild(iframe);
-        setTimeout(() => {
-          try { document.body.removeChild(iframe); } catch(err) {}
-        }, 12000);
-        indicateSuccess('Saved to Downloads!');
-        return;
       } catch (e) {}
     }
 
-    // 3. Fallback: Browser native anchor click directly to the stream (Never hangs)
-    const fallbackUrl = directUrl || targetUrl;
+    // 4. Native Browser Fallback (Never hangs)
+    const fallbackUrl = directUrl || sourceUrl;
     if (fallbackUrl) {
       const a = document.createElement('a');
       a.href = fallbackUrl;
@@ -1590,7 +1612,12 @@ document.addEventListener('DOMContentLoaded', () => {
       setTimeout(() => {
         try { document.body.removeChild(a); } catch(e) {}
       }, 1500);
-      indicateSuccess('Download link triggered!');
+
+      if (isYouTube && !hasLocalEngine) {
+        indicateSuccess('Opening stream... (Tip: Run start.bat for merged MP4)');
+      } else {
+        indicateSuccess('Download link triggered!');
+      }
       return;
     }
 
