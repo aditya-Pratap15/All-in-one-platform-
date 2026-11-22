@@ -17,6 +17,7 @@ import json
 import os
 import tempfile
 import uuid
+import base64
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -245,26 +246,80 @@ def download_file(
 
 
 @app.post("/api/upload-drive")
-async def upload_to_drive(request: Request):
+async def upload_to_drive(request: Request, background_tasks: BackgroundTasks):
     """
-    Proxies video upload to Google Drive Webhook or downloads and sends stream.
-    Works for both local engine and Render cloud engine.
+    Downloads and merges the full video with audio locally, then uploads the binary (base64)
+    directly into the user's Google Drive folder via their Google Apps Script webhook.
+    Eliminates 403 Forbidden errors because the file data is sent directly from your connection!
     """
     try:
         data = await request.json()
         webhook_url = data.get("webhook_url")
+        target_url = data.get("url") or data.get("videoUrl") or ""
+        folder_url = data.get("folder_url") or data.get("folderUrl") or ""
+        filename = data.get("filename") or "video.mp4"
+
         if not webhook_url:
             raise HTTPException(status_code=400, detail="Missing Google Drive Webhook URL")
+        if not target_url:
+            raise HTTPException(status_code=400, detail="Missing video URL")
 
-        # Forward request to Google Apps Script webhook
+        clean_filename = re.sub(r'[^a-zA-Z0-9_\-\.]', '_', filename)
+        if not clean_filename.endswith('.mp4'):
+            clean_filename += '.mp4'
+
+        # Download and merge locally with audio
+        tmp_path = os.path.join(tempfile.gettempdir(), f"omni_drive_{uuid.uuid4().hex}.mp4")
+        ydl_opts = {
+            'format': 'bestvideo*+bestaudio/best[acodec!=none]/best',
+            'merge_output_format': 'mp4',
+            'extractor_args': {
+                'youtube': {
+                    'player_client': ['android', 'web']
+                }
+            },
+            'outtmpl': tmp_path,
+            'quiet': True,
+            'no_warnings': True,
+            'noplaylist': True
+        }
+
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            ydl.download([target_url])
+
+        if not os.path.exists(tmp_path):
+            base = tmp_path.rsplit('.', 1)[0]
+            for f in os.listdir(tempfile.gettempdir()):
+                if f.startswith(os.path.basename(base)):
+                    tmp_path = os.path.join(tempfile.gettempdir(), f)
+                    break
+
+        if not os.path.exists(tmp_path):
+            raise HTTPException(status_code=500, detail="Could not assemble video file for Drive upload.")
+
+        background_tasks.add_task(cleanup_temp_file, tmp_path)
+
+        with open(tmp_path, "rb") as f:
+            file_bytes = f.read()
+            file_b64 = base64.b64encode(file_bytes).decode('utf-8')
+
+        payload = {
+            "folderUrl": folder_url,
+            "filename": clean_filename,
+            "fileBase64": file_b64,
+            "mimeType": "video/mp4",
+            "title": data.get("title") or clean_filename
+        }
+
         req = urllib.request.Request(
             webhook_url,
-            data=json.dumps(data).encode('utf-8'),
+            data=json.dumps(payload).encode('utf-8'),
             headers={'Content-Type': 'text/plain;charset=utf-8'}
         )
-        with urllib.request.urlopen(req, timeout=120) as resp:
+        with urllib.request.urlopen(req, timeout=180) as resp:
             resp_body = resp.read().decode('utf-8')
             return json.loads(resp_body)
+
     except Exception as e:
         print("Drive upload proxy error:", e)
         raise HTTPException(status_code=500, detail=str(e))

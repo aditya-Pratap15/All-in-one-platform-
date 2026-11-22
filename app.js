@@ -1851,11 +1851,22 @@ function extractFolderId(urlOrId) {
   }
   updateDriveConfigLabels();
 
+  const blobToBase64 = (blob) => new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      const res = reader.result;
+      const base64 = res.includes(',') ? res.split(',')[1] : res;
+      resolve(base64);
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(blob);
+  });
+
   // Core Google Drive Upload Handler
   const uploadToGoogleDrive = async (videoData, folderInputVal, filename, statusBox, actionBtn) => {
     if (!driveWebhookUrl) {
       openDriveSetup();
-      return;
+      return false;
     }
 
     const folder = (folderInputVal || '').trim();
@@ -1866,7 +1877,7 @@ function extractFolderId(urlOrId) {
         statusBox.classList.remove('hidden');
         if (window.lucide) window.lucide.createIcons();
       }
-      return;
+      return false;
     }
 
     syncDriveFolderInputs(folder);
@@ -1874,35 +1885,92 @@ function extractFolderId(urlOrId) {
     const originalBtnHtml = actionBtn ? actionBtn.innerHTML : '';
     if (actionBtn) {
       actionBtn.disabled = true;
-      actionBtn.innerHTML = '<i data-lucide="loader-2" class="spin"></i> <span>Pushing to Drive...</span>';
+      actionBtn.innerHTML = '<i data-lucide="loader-2" class="spin"></i> <span>Processing Drive Push...</span>';
       if (window.lucide) window.lucide.createIcons();
     }
 
     if (statusBox) {
       statusBox.className = 'drive-status-box loading';
-      statusBox.innerHTML = '<i data-lucide="loader-2" class="spin"></i> <span>Transferring video into Google Drive directly...</span>';
+      statusBox.innerHTML = '<i data-lucide="loader-2" class="spin"></i> <span>Preparing video and pushing to Google Drive...</span>';
       statusBox.classList.remove('hidden');
       if (window.lucide) window.lucide.createIcons();
     }
 
+    await checkEngines();
+
     try {
-      const payload = {
-        videoUrl: videoData.directUrl || videoData.url || '',
-        folderUrl: folder,
-        filename: filename || 'video.mp4',
-        title: videoData.title || 'Video'
-      };
+      let result = null;
 
-      // Use text/plain to prevent CORS preflight in Google Apps Script Web Apps
-      const res = await fetch(driveWebhookUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-        body: JSON.stringify(payload)
-      });
+      // Method A: If Local Engine is running (start.bat on PC):
+      // The local engine downloads & merges complete video+audio with ffmpeg, converts to binary,
+      // and sends to your Google Apps Script webhook. 100% bypass of 403 Forbidden token errors!
+      if (isLocalEngineOnline) {
+        if (statusBox) {
+          statusBox.innerHTML = '<i data-lucide="loader-2" class="spin"></i> <span>Local Engine: Merging full audio & uploading to Drive...</span>';
+          if (window.lucide) window.lucide.createIcons();
+        }
 
-      const result = await res.json();
+        const res = await fetch(`${LOCAL_ENGINE_URL}/api/upload-drive`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            url: videoData.sourceUrl || videoData.directUrl,
+            folder_url: folder,
+            filename: filename,
+            webhook_url: driveWebhookUrl,
+            title: videoData.title
+          })
+        });
 
-      if (result.status === 'success') {
+        if (!res.ok) {
+          const errData = await res.json().catch(() => ({}));
+          throw new Error(errData.detail || `Local engine upload returned HTTP ${res.status}`);
+        }
+        result = await res.json();
+      } else {
+        // Method B: Browser direct push (GitHub Pages)
+        let fileBase64 = null;
+
+        // If preloaded blob exists in memory, use it directly (bypasses 403 CDN locks)
+        if (videoData.preloadedBlob && videoData.preloadedBlob.size > 1000) {
+          if (statusBox) {
+            statusBox.innerHTML = '<i data-lucide="loader-2" class="spin"></i> <span>Pushing buffered video to Google Drive...</span>';
+            if (window.lucide) window.lucide.createIcons();
+          }
+          fileBase64 = await blobToBase64(videoData.preloadedBlob);
+        } else if (videoData.directUrl) {
+          try {
+            const blobRes = await fetch(videoData.directUrl, { referrerPolicy: 'no-referrer' });
+            if (blobRes.ok) {
+              const b = await blobRes.blob();
+              fileBase64 = await blobToBase64(b);
+            }
+          } catch (be) {}
+        }
+
+        const payload = {
+          folderUrl: folder,
+          filename: filename || 'video.mp4',
+          title: videoData.title || 'Video'
+        };
+
+        if (fileBase64) {
+          payload.fileBase64 = fileBase64;
+          payload.mimeType = 'video/mp4';
+        } else {
+          payload.videoUrl = videoData.directUrl || videoData.url || '';
+        }
+
+        const res = await fetch(driveWebhookUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+          body: JSON.stringify(payload)
+        });
+
+        result = await res.json();
+      }
+
+      if (result && result.status === 'success') {
         const folderId = extractDriveFolderId(folder);
         const viewLink = result.fileUrl || (folderId ? `https://drive.google.com/drive/folders/${folderId}` : 'https://drive.google.com');
 
@@ -1919,13 +1987,17 @@ function extractFolderId(urlOrId) {
         }
         return true;
       } else {
-        throw new Error(result.message || 'Google Drive upload rejected.');
+        throw new Error((result && result.message) || 'Google Drive upload rejected.');
       }
     } catch (err) {
       console.error('Drive upload error:', err);
+      let errMsg = err.message || 'Drive transfer failed.';
+      if (errMsg.includes('403')) {
+        errMsg = 'YouTube stream token expired (HTTP 403). For YouTube videos, run start.bat so the local engine uploads merged HD audio+video directly!';
+      }
       if (statusBox) {
         statusBox.className = 'drive-status-box error';
-        statusBox.innerHTML = `<i data-lucide="alert-circle"></i> <span>${err.message || 'Drive transfer failed. Check your webhook or folder permissions.'}</span>`;
+        statusBox.innerHTML = `<i data-lucide="alert-circle"></i> <span>${errMsg}</span>`;
         statusBox.classList.remove('hidden');
         if (window.lucide) window.lucide.createIcons();
       }
@@ -1988,20 +2060,8 @@ function extractFolderId(urlOrId) {
       if (window.lucide) window.lucide.createIcons();
 
       try {
-        const payload = {
-          videoUrl: item.data.directUrl || item.data.url || '',
-          folderUrl: folder,
-          filename: filename,
-          title: item.data.title || 'Video'
-        };
-
-        const res = await fetch(driveWebhookUrl, {
-          method: 'POST',
-          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-          body: JSON.stringify(payload)
-        });
-        const rJson = await res.json();
-        if (rJson.status === 'success') {
+        const ok = await uploadToGoogleDrive(item.data, folder, filename, null, null);
+        if (ok) {
           successCount++;
           updateQueueItemDOM(item, 'Pushed to Drive');
         }
