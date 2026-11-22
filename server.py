@@ -332,7 +332,6 @@ def extract_video(url: str = Query(..., description="The URL of the video to ext
 
     # 2. Universal yt-dlp extraction (Instagram, Facebook, YouTube, TikTok)
     ydl_opts = {
-        'format': 'best',
         'quiet': True,
         'no_warnings': True,
         'extract_flat': False
