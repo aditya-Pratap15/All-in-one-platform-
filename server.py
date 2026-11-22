@@ -5,7 +5,7 @@ Direct stream extraction with 100% success and maximum bitrate.
 Serves full frontend directly on http://127.0.0.1:8000
 """
 
-from fastapi import FastAPI, HTTPException, Query, BackgroundTasks
+from fastapi import FastAPI, HTTPException, Query, BackgroundTasks, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -241,6 +241,32 @@ def download_file(
         )
     except Exception as e:
         print("yt-dlp download error:", e)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/upload-drive")
+async def upload_to_drive(request: Request):
+    """
+    Proxies video upload to Google Drive Webhook or downloads and sends stream.
+    Works for both local engine and Render cloud engine.
+    """
+    try:
+        data = await request.json()
+        webhook_url = data.get("webhook_url")
+        if not webhook_url:
+            raise HTTPException(status_code=400, detail="Missing Google Drive Webhook URL")
+
+        # Forward request to Google Apps Script webhook
+        req = urllib.request.Request(
+            webhook_url,
+            data=json.dumps(data).encode('utf-8'),
+            headers={'Content-Type': 'text/plain;charset=utf-8'}
+        )
+        with urllib.request.urlopen(req, timeout=120) as resp:
+            resp_body = resp.read().decode('utf-8')
+            return json.loads(resp_body)
+    except Exception as e:
+        print("Drive upload proxy error:", e)
         raise HTTPException(status_code=500, detail=str(e))
 
 

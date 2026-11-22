@@ -259,6 +259,28 @@
                     <i data-lucide="download"></i>
                     <span id="downloadBtnText">Download Video (Max Quality)</span>
                   </button>
+
+                  <!-- Google Drive Direct Cloud Push Section -->
+                  <div class="drive-box" id="singleDriveBox">
+                    <div class="drive-box-header">
+                      <div class="drive-label">
+                        <i data-lucide="folder-up"></i>
+                        <span>Push to Google Drive</span>
+                      </div>
+                      <button type="button" id="openDriveSetupBtn" class="drive-config-btn" title="Setup or change Google Drive Webhook">
+                        <i data-lucide="settings-2"></i>
+                        <span id="driveConfigLabel">Setup Webhook</span>
+                      </button>
+                    </div>
+                    <div class="drive-input-group">
+                      <input type="text" id="driveFolderInput" class="drive-folder-input" placeholder="Paste Google Drive folder link or ID (e.g. drive.google.com/drive/folders/...)" />
+                      <button type="button" id="pushToDriveBtn" class="drive-action-btn">
+                        <i data-lucide="upload-cloud"></i>
+                        <span>Push to Drive</span>
+                      </button>
+                    </div>
+                    <div id="driveUploadStatus" class="drive-status-box hidden"></div>
+                  </div>
                   
                   <div class="secondary-actions-row">
                     <button type="button" id="copyLinkBtn" class="secondary-btn">
@@ -292,6 +314,28 @@
                 <i data-lucide="download"></i>
                 <span>Download Sequentially</span>
               </button>
+            </div>
+
+            <!-- Batch Google Drive Direct Push Section -->
+            <div class="batch-drive-box" id="batchDriveBox">
+              <div class="drive-box-header">
+                <div class="drive-label">
+                  <i data-lucide="folder-up"></i>
+                  <span>Batch Push to Google Drive</span>
+                </div>
+                <button type="button" id="openBatchDriveSetupBtn" class="drive-config-btn" title="Setup or change Google Drive Webhook">
+                  <i data-lucide="settings-2"></i>
+                  <span>Setup Webhook</span>
+                </button>
+              </div>
+              <div class="drive-input-group">
+                <input type="text" id="batchDriveFolderInput" class="drive-folder-input" placeholder="Paste Google Drive folder link or ID for batch upload..." />
+                <button type="button" id="batchPushToDriveBtn" class="drive-action-btn" disabled>
+                  <i data-lucide="upload-cloud"></i>
+                  <span>Push All to Drive</span>
+                </button>
+              </div>
+              <div id="batchDriveStatus" class="drive-status-box hidden"></div>
             </div>
           </div>
 
@@ -408,9 +452,122 @@
               <span>Auto-load video preview in browser before downloading</span>
             </label>
           </div>
+
+          <div class="setting-divider"></div>
+
+          <div class="setting-item">
+            <label for="settingsDriveWebhook"><strong>Google Drive Webhook URL:</strong></label>
+            <input type="url" id="settingsDriveWebhook" placeholder="https://script.google.com/macros/s/.../exec" class="styled-input" />
+            <span class="setting-help">Your free Google Apps Script webhook for direct 1-click cloud uploads.</span>
+          </div>
+
+          <div class="setting-item">
+            <label for="settingsDriveFolder"><strong>Default Google Drive Folder URL or ID:</strong></label>
+            <input type="text" id="settingsDriveFolder" placeholder="https://drive.google.com/drive/folders/... or Folder ID" class="styled-input" />
+            <span class="setting-help">Default folder for uploads. You can also change this directly on any video card!</span>
+          </div>
         </div>
         <div class="modal-footer">
           <button type="button" id="saveSettingsBtn" class="download-action-btn">Save Changes</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Google Drive 1-Click Setup Guide Modal -->
+    <div id="driveSetupModal" class="modal-backdrop hidden">
+      <div class="modal-card drive-modal-card">
+        <div class="modal-header">
+          <h3><i data-lucide="cloud-upload"></i> Connect Google Drive (60s Setup)</h3>
+          <button id="closeDriveSetupBtn" class="icon-btn"><i data-lucide="x"></i></button>
+        </div>
+        <div class="modal-body drive-modal-body">
+          <p class="drive-modal-intro">
+            Upload single videos or full batches directly to <strong>any Google Drive folder</strong> without consuming your phone/PC upload bandwidth! Follow these 3 quick steps:
+          </p>
+
+          <div class="setup-step">
+            <div class="step-badge">Step 1</div>
+            <div class="step-content">
+              <p>Open <a href="https://script.google.com" target="_blank" rel="noopener noreferrer" class="external-link"><strong>script.google.com</strong> <i data-lucide="external-link" style="width:12px;height:12px;vertical-align:middle;"></i></a> in your browser and click <strong>New project</strong>.</p>
+            </div>
+          </div>
+
+          <div class="setup-step">
+            <div class="step-badge">Step 2</div>
+            <div class="step-content">
+              <p>Delete all existing code, paste the script below, and click <strong>Save (<kbd>Ctrl+S</kbd>)</strong>:</p>
+              <div class="code-copy-container">
+                <button type="button" id="copyGasCodeBtn" class="copy-code-btn">
+                  <i data-lucide="copy"></i> <span>Copy Script Code</span>
+                </button>
+                <pre class="gas-code-preview"><code>function doPost(e) {
+  try {
+    var data = JSON.parse(e.postData.contents);
+    var folderId = extractFolderId(data.folderUrl || data.folderId);
+    var folder = folderId ? DriveApp.getFolderById(folderId) : DriveApp.getRootFolder();
+    var filename = data.filename || ('video_' + Date.now() + '.mp4');
+    var file;
+
+    if (data.fileBase64) {
+      var bytes = Utilities.base64Decode(data.fileBase64);
+      var blob = Utilities.newBlob(bytes, data.mimeType || 'video/mp4', filename);
+      file = folder.createFile(blob);
+    } else if (data.videoUrl) {
+      var response = UrlFetchApp.fetch(data.videoUrl, { headers: { 'User-Agent': 'Mozilla/5.0' }, muteHttpExceptions: true });
+      if (response.getResponseCode() &gt;= 200 &amp;&amp; response.getResponseCode() &lt; 300) {
+        var blob = response.getBlob().setName(filename);
+        file = folder.createFile(blob);
+      } else {
+        throw new Error('Could not fetch video stream (HTTP ' + response.getResponseCode() + ')');
+      }
+    } else {
+      throw new Error('No video URL or data provided');
+    }
+
+    return ContentService.createTextOutput(JSON.stringify({
+      status: 'success',
+      message: 'Uploaded to Google Drive successfully!',
+      fileId: file.getId(),
+      fileName: file.getName(),
+      fileUrl: file.getUrl(),
+      folderUrl: folder.getUrl()
+    })).setMimeType(ContentService.MimeType.JSON);
+  } catch (err) {
+    return ContentService.createTextOutput(JSON.stringify({
+      status: 'error',
+      message: err.toString()
+    })).setMimeType(ContentService.MimeType.JSON);
+  }
+}
+
+function extractFolderId(urlOrId) {
+  if (!urlOrId) return null;
+  var str = urlOrId.trim();
+  var match = str.match(/folders\/([a-zA-Z0-9_-]+)/);
+  if (match) return match[1];
+  var matchId = str.match(/id=([a-zA-Z0-9_-]+)/);
+  if (matchId) return matchId[1];
+  if (/^[a-zA-Z0-9_-]{20,}$/.test(str)) return str;
+  return null;
+}</code></pre>
+              </div>
+            </div>
+          </div>
+
+          <div class="setup-step">
+            <div class="step-badge">Step 3</div>
+            <div class="step-content">
+              <p>Click <strong>Deploy &gt; New deployment</strong> &gt; Select <strong>Web app</strong> (gear icon) &gt; Set <em>"Who has access"</em> to <strong>Anyone</strong> &gt; Click <strong>Deploy</strong>.</p>
+              <p class="step-tip">Authorize permissions when prompted. Copy the <strong>Web app URL</strong> and paste it below:</p>
+              
+              <div class="webhook-input-row">
+                <input type="url" id="modalDriveWebhookInput" placeholder="https://script.google.com/macros/s/.../exec" class="styled-input" />
+                <button type="button" id="saveDriveWebhookModalBtn" class="download-action-btn">
+                  <i data-lucide="check"></i> <span>Save Webhook</span>
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -422,6 +579,6 @@
     </footer>
   </div>
 
-  <script src="app.js?v=13.0"></script>
+  <script src="app.js?v=14.0"></script>
 </body>
 </html>

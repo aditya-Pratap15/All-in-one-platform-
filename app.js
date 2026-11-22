@@ -77,6 +77,33 @@ document.addEventListener('DOMContentLoaded', () => {
   const customApiUrl = document.getElementById('customApiUrl');
   const autoPreviewCheck = document.getElementById('autoPreviewCheck');
 
+  // Google Drive Elements
+  const singleDriveBox = document.getElementById('singleDriveBox');
+  const driveFolderInput = document.getElementById('driveFolderInput');
+  const pushToDriveBtn = document.getElementById('pushToDriveBtn');
+  const driveUploadStatus = document.getElementById('driveUploadStatus');
+  const openDriveSetupBtn = document.getElementById('openDriveSetupBtn');
+  const driveConfigLabel = document.getElementById('driveConfigLabel');
+
+  const batchDriveBox = document.getElementById('batchDriveBox');
+  const batchDriveFolderInput = document.getElementById('batchDriveFolderInput');
+  const batchPushToDriveBtn = document.getElementById('batchPushToDriveBtn');
+  const batchDriveStatus = document.getElementById('batchDriveStatus');
+  const openBatchDriveSetupBtn = document.getElementById('openBatchDriveSetupBtn');
+
+  const driveSetupModal = document.getElementById('driveSetupModal');
+  const closeDriveSetupBtn = document.getElementById('closeDriveSetupBtn');
+  const copyGasCodeBtn = document.getElementById('copyGasCodeBtn');
+  const modalDriveWebhookInput = document.getElementById('modalDriveWebhookInput');
+  const saveDriveWebhookModalBtn = document.getElementById('saveDriveWebhookModalBtn');
+
+  const settingsDriveWebhook = document.getElementById('settingsDriveWebhook');
+  const settingsDriveFolder = document.getElementById('settingsDriveFolder');
+
+  // Google Drive State
+  let driveWebhookUrl = localStorage.getItem('omni_drive_webhook') || '';
+  let driveFolderUrl = localStorage.getItem('omni_drive_folder') || '';
+
   // Theme & Status Elements
   const themeToggle = document.getElementById('themeToggle');
   const themeIcon = document.getElementById('themeIcon');
@@ -1313,8 +1340,9 @@ document.addEventListener('DOMContentLoaded', () => {
     if (readyItems.length > 0) {
       batchDownloadZipBtn.disabled = false;
       batchDownloadSeqBtn.disabled = false;
+      if (batchPushToDriveBtn) batchPushToDriveBtn.disabled = false;
       batchProgressTitle.textContent = `Batch Complete! (${readyItems.length}/${totalCount} Ready)`;
-      batchProgressSubtext.textContent = `All extracted videos are ready for 1-click ZIP or sequential download.`;
+      batchProgressSubtext.textContent = `All extracted videos are ready for 1-click ZIP, sequential, or Google Drive upload.`;
     } else {
       batchProgressTitle.textContent = `Batch Finished (0 of ${totalCount} Succeeded)`;
       batchProgressSubtext.textContent = `Please verify that the URLs point to active, public videos.`;
@@ -1474,6 +1502,22 @@ document.addEventListener('DOMContentLoaded', () => {
     // Single Download Button
     if (downloadBtnText) {
       downloadBtnText.textContent = `Download Video (${data.qualityLabel ? data.qualityLabel.split(' ')[0] : 'Highest Quality'})`;
+    }
+
+    // Google Drive Single Upload Handler
+    if (pushToDriveBtn) {
+      if (driveFolderInput && !driveFolderInput.value && driveFolderUrl) {
+        driveFolderInput.value = driveFolderUrl;
+      }
+      if (driveUploadStatus) {
+        driveUploadStatus.classList.add('hidden');
+        driveUploadStatus.innerHTML = '';
+      }
+      pushToDriveBtn.onclick = () => {
+        const folder = (driveFolderInput ? driveFolderInput.value : '').trim() || driveFolderUrl;
+        const filename = getSafeFilename(data.title, 'mp4');
+        uploadToGoogleDrive(data, folder, filename, driveUploadStatus, pushToDriveBtn);
+      };
     }
 
     // INSTANT DOWNLOAD HANDLER (0 Delay):
@@ -1674,13 +1718,326 @@ document.addEventListener('DOMContentLoaded', () => {
     resultCard.classList.add('hidden');
   };
 
+  // --- Google Drive Integration Engine ---
+  const GAS_SCRIPT_TEMPLATE = `function doPost(e) {
+  try {
+    var data = JSON.parse(e.postData.contents);
+    var folderId = extractFolderId(data.folderUrl || data.folderId);
+    var folder = folderId ? DriveApp.getFolderById(folderId) : DriveApp.getRootFolder();
+    var filename = data.filename || ('video_' + Date.now() + '.mp4');
+    var file;
+
+    if (data.fileBase64) {
+      var bytes = Utilities.base64Decode(data.fileBase64);
+      var blob = Utilities.newBlob(bytes, data.mimeType || 'video/mp4', filename);
+      file = folder.createFile(blob);
+    } else if (data.videoUrl) {
+      var response = UrlFetchApp.fetch(data.videoUrl, { headers: { 'User-Agent': 'Mozilla/5.0' }, muteHttpExceptions: true });
+      if (response.getResponseCode() >= 200 && response.getResponseCode() < 300) {
+        var blob = response.getBlob().setName(filename);
+        file = folder.createFile(blob);
+      } else {
+        throw new Error('Could not fetch video stream (HTTP ' + response.getResponseCode() + ')');
+      }
+    } else {
+      throw new Error('No video URL or data provided');
+    }
+
+    return ContentService.createTextOutput(JSON.stringify({
+      status: 'success',
+      message: 'Uploaded to Google Drive successfully!',
+      fileId: file.getId(),
+      fileName: file.getName(),
+      fileUrl: file.getUrl(),
+      folderUrl: folder.getUrl()
+    })).setMimeType(ContentService.MimeType.JSON);
+  } catch (err) {
+    return ContentService.createTextOutput(JSON.stringify({
+      status: 'error',
+      message: err.toString()
+    })).setMimeType(ContentService.MimeType.JSON);
+  }
+}
+
+function extractFolderId(urlOrId) {
+  if (!urlOrId) return null;
+  var str = urlOrId.trim();
+  var match = str.match(/folders\\/([a-zA-Z0-9_-]+)/);
+  if (match) return match[1];
+  var matchId = str.match(/id=([a-zA-Z0-9_-]+)/);
+  if (matchId) return matchId[1];
+  if (/^[a-zA-Z0-9_-]{20,}$/.test(str)) return str;
+  return null;
+}`;
+
+  const extractDriveFolderId = (urlOrId) => {
+    if (!urlOrId) return '';
+    const str = urlOrId.trim();
+    const match = str.match(/folders\/([a-zA-Z0-9_-]+)/);
+    if (match) return match[1];
+    const matchId = str.match(/id=([a-zA-Z0-9_-]+)/);
+    if (matchId) return matchId[1];
+    if (/^[a-zA-Z0-9_-]{20,}$/.test(str)) return str;
+    return str;
+  };
+
+  const updateDriveConfigLabels = () => {
+    const isConfigured = !!driveWebhookUrl;
+    if (driveConfigLabel) {
+      driveConfigLabel.textContent = isConfigured ? 'Webhook Configured' : 'Setup Webhook';
+    }
+    if (openBatchDriveSetupBtn) {
+      const span = openBatchDriveSetupBtn.querySelector('span');
+      if (span) span.textContent = isConfigured ? 'Webhook Configured' : 'Setup Webhook';
+    }
+  };
+
+  const openDriveSetup = () => {
+    if (modalDriveWebhookInput) modalDriveWebhookInput.value = driveWebhookUrl;
+    driveSetupModal?.classList.remove('hidden');
+    if (window.lucide) window.lucide.createIcons();
+  };
+
+  const closeDriveSetup = () => {
+    driveSetupModal?.classList.add('hidden');
+  };
+
+  openDriveSetupBtn?.addEventListener('click', openDriveSetup);
+  openBatchDriveSetupBtn?.addEventListener('click', openDriveSetup);
+  closeDriveSetupBtn?.addEventListener('click', closeDriveSetup);
+  driveSetupModal?.addEventListener('click', (e) => {
+    if (e.target === driveSetupModal) closeDriveSetup();
+  });
+
+  copyGasCodeBtn?.addEventListener('click', () => {
+    navigator.clipboard.writeText(GAS_SCRIPT_TEMPLATE).then(() => {
+      const origHtml = copyGasCodeBtn.innerHTML;
+      copyGasCodeBtn.innerHTML = `<i data-lucide="check"></i> <span>Copied!</span>`;
+      if (window.lucide) window.lucide.createIcons();
+      setTimeout(() => {
+        copyGasCodeBtn.innerHTML = origHtml;
+        if (window.lucide) window.lucide.createIcons();
+      }, 2500);
+    });
+  });
+
+  saveDriveWebhookModalBtn?.addEventListener('click', () => {
+    const val = (modalDriveWebhookInput?.value || '').trim();
+    if (!val) {
+      alert('Please paste your Google Apps Script Web App URL.');
+      return;
+    }
+    driveWebhookUrl = val;
+    localStorage.setItem('omni_drive_webhook', driveWebhookUrl);
+    updateDriveConfigLabels();
+    closeDriveSetup();
+    alert('Google Drive Webhook configured successfully! You can now push any video directly to your Drive folder.');
+  });
+
+  // Sync folder inputs and remember default
+  const syncDriveFolderInputs = (val) => {
+    driveFolderUrl = val;
+    localStorage.setItem('omni_drive_folder', val);
+    if (driveFolderInput && driveFolderInput.value !== val) driveFolderInput.value = val;
+    if (batchDriveFolderInput && batchDriveFolderInput.value !== val) batchDriveFolderInput.value = val;
+  };
+
+  driveFolderInput?.addEventListener('input', (e) => syncDriveFolderInputs(e.target.value.trim()));
+  batchDriveFolderInput?.addEventListener('input', (e) => syncDriveFolderInputs(e.target.value.trim()));
+
+  if (driveFolderUrl) {
+    if (driveFolderInput) driveFolderInput.value = driveFolderUrl;
+    if (batchDriveFolderInput) batchDriveFolderInput.value = driveFolderUrl;
+  }
+  updateDriveConfigLabels();
+
+  // Core Google Drive Upload Handler
+  const uploadToGoogleDrive = async (videoData, folderInputVal, filename, statusBox, actionBtn) => {
+    if (!driveWebhookUrl) {
+      openDriveSetup();
+      return;
+    }
+
+    const folder = (folderInputVal || '').trim();
+    if (!folder) {
+      if (statusBox) {
+        statusBox.className = 'drive-status-box error';
+        statusBox.innerHTML = '<i data-lucide="alert-circle"></i> <span>Please paste your Google Drive folder link or ID above!</span>';
+        statusBox.classList.remove('hidden');
+        if (window.lucide) window.lucide.createIcons();
+      }
+      return;
+    }
+
+    syncDriveFolderInputs(folder);
+
+    const originalBtnHtml = actionBtn ? actionBtn.innerHTML : '';
+    if (actionBtn) {
+      actionBtn.disabled = true;
+      actionBtn.innerHTML = '<i data-lucide="loader-2" class="spin"></i> <span>Pushing to Drive...</span>';
+      if (window.lucide) window.lucide.createIcons();
+    }
+
+    if (statusBox) {
+      statusBox.className = 'drive-status-box loading';
+      statusBox.innerHTML = '<i data-lucide="loader-2" class="spin"></i> <span>Transferring video into Google Drive directly...</span>';
+      statusBox.classList.remove('hidden');
+      if (window.lucide) window.lucide.createIcons();
+    }
+
+    try {
+      const payload = {
+        videoUrl: videoData.directUrl || videoData.url || '',
+        folderUrl: folder,
+        filename: filename || 'video.mp4',
+        title: videoData.title || 'Video'
+      };
+
+      // Use text/plain to prevent CORS preflight in Google Apps Script Web Apps
+      const res = await fetch(driveWebhookUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify(payload)
+      });
+
+      const result = await res.json();
+
+      if (result.status === 'success') {
+        const folderId = extractDriveFolderId(folder);
+        const viewLink = result.fileUrl || (folderId ? `https://drive.google.com/drive/folders/${folderId}` : 'https://drive.google.com');
+
+        if (statusBox) {
+          statusBox.className = 'drive-status-box success';
+          statusBox.innerHTML = `<i data-lucide="check-circle-2"></i> <span>Uploaded to Drive successfully!</span> <a href="${viewLink}" target="_blank" rel="noopener noreferrer">View in Google Drive <i data-lucide="external-link" style="width:12px;height:12px;vertical-align:middle;"></i></a>`;
+          statusBox.classList.remove('hidden');
+          if (window.lucide) window.lucide.createIcons();
+        }
+
+        if (actionBtn) {
+          actionBtn.innerHTML = '<i data-lucide="check"></i> <span>Pushed!</span>';
+          if (window.lucide) window.lucide.createIcons();
+        }
+        return true;
+      } else {
+        throw new Error(result.message || 'Google Drive upload rejected.');
+      }
+    } catch (err) {
+      console.error('Drive upload error:', err);
+      if (statusBox) {
+        statusBox.className = 'drive-status-box error';
+        statusBox.innerHTML = `<i data-lucide="alert-circle"></i> <span>${err.message || 'Drive transfer failed. Check your webhook or folder permissions.'}</span>`;
+        statusBox.classList.remove('hidden');
+        if (window.lucide) window.lucide.createIcons();
+      }
+      return false;
+    } finally {
+      if (actionBtn) {
+        actionBtn.disabled = false;
+        setTimeout(() => {
+          actionBtn.innerHTML = originalBtnHtml;
+          if (window.lucide) window.lucide.createIcons();
+        }, 4500);
+      }
+    }
+  };
+
+  // Batch Push All to Google Drive
+  batchPushToDriveBtn?.addEventListener('click', async () => {
+    if (!driveWebhookUrl) {
+      openDriveSetup();
+      return;
+    }
+
+    const folder = (batchDriveFolderInput ? batchDriveFolderInput.value : '').trim() || driveFolderUrl;
+    if (!folder) {
+      if (batchDriveStatus) {
+        batchDriveStatus.className = 'drive-status-box error';
+        batchDriveStatus.innerHTML = '<i data-lucide="alert-circle"></i> <span>Please paste your target Google Drive folder link above!</span>';
+        batchDriveStatus.classList.remove('hidden');
+        if (window.lucide) window.lucide.createIcons();
+      }
+      return;
+    }
+
+    const readyItems = batchItems.filter(i => i.status === 'ready' && i.data);
+    if (readyItems.length === 0) return;
+
+    syncDriveFolderInputs(folder);
+
+    const originalBtnHtml = batchPushToDriveBtn.innerHTML;
+    batchPushToDriveBtn.disabled = true;
+    batchPushToDriveBtn.innerHTML = `<i data-lucide="loader-2" class="spin"></i> <span>Pushing Batch (0/${readyItems.length})...</span>`;
+    if (window.lucide) window.lucide.createIcons();
+
+    if (batchDriveStatus) {
+      batchDriveStatus.className = 'drive-status-box loading';
+      batchDriveStatus.innerHTML = `<i data-lucide="loader-2" class="spin"></i> <span>Transferring batch into your Drive folder (0 of ${readyItems.length})...</span>`;
+      batchDriveStatus.classList.remove('hidden');
+      if (window.lucide) window.lucide.createIcons();
+    }
+
+    let successCount = 0;
+    for (let index = 0; index < readyItems.length; index++) {
+      const item = readyItems[index];
+      const filename = `${index + 1}_${getSafeFilename(item.data.title, 'mp4')}`;
+
+      batchPushToDriveBtn.innerHTML = `<i data-lucide="loader-2" class="spin"></i> <span>Pushing (${index + 1}/${readyItems.length})...</span>`;
+      if (batchDriveStatus) {
+        batchDriveStatus.innerHTML = `<i data-lucide="loader-2" class="spin"></i> <span>Pushing ${index + 1} of ${readyItems.length}: <strong>${escapeHtml(item.data.title || 'Video')}</strong></span>`;
+      }
+      if (window.lucide) window.lucide.createIcons();
+
+      try {
+        const payload = {
+          videoUrl: item.data.directUrl || item.data.url || '',
+          folderUrl: folder,
+          filename: filename,
+          title: item.data.title || 'Video'
+        };
+
+        const res = await fetch(driveWebhookUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+          body: JSON.stringify(payload)
+        });
+        const rJson = await res.json();
+        if (rJson.status === 'success') {
+          successCount++;
+          updateQueueItemDOM(item, 'Pushed to Drive');
+        }
+      } catch (err) {
+        console.warn(`Batch Drive push error on item ${index + 1}:`, err);
+      }
+    }
+
+    const folderId = extractDriveFolderId(folder);
+    const viewLink = folderId ? `https://drive.google.com/drive/folders/${folderId}` : 'https://drive.google.com';
+
+    batchPushToDriveBtn.disabled = false;
+    batchPushToDriveBtn.innerHTML = `<i data-lucide="check-circle-2"></i> <span>Batch Pushed!</span>`;
+
+    if (batchDriveStatus) {
+      batchDriveStatus.className = 'drive-status-box success';
+      batchDriveStatus.innerHTML = `<i data-lucide="check-circle-2"></i> <span>Finished! ${successCount} of ${readyItems.length} videos pushed to your Google Drive folder!</span> <a href="${viewLink}" target="_blank" rel="noopener noreferrer">Open Drive Folder <i data-lucide="external-link" style="width:12px;height:12px;vertical-align:middle;"></i></a>`;
+      if (window.lucide) window.lucide.createIcons();
+    }
+
+    setTimeout(() => {
+      batchPushToDriveBtn.innerHTML = originalBtnHtml;
+      if (window.lucide) window.lucide.createIcons();
+    }, 5000);
+  });
+
   // --- Settings Modal Handlers ---
   settingsBtn?.addEventListener('click', () => {
     engineSelect.value = activeEngine;
     customApiUrl.value = customApi;
     autoPreviewCheck.checked = autoPreview;
+    if (settingsDriveWebhook) settingsDriveWebhook.value = driveWebhookUrl;
+    if (settingsDriveFolder) settingsDriveFolder.value = driveFolderUrl;
     toggleCustomField();
     settingsModal.classList.remove('hidden');
+    if (window.lucide) window.lucide.createIcons();
   });
 
   const closeSettings = () => settingsModal.classList.add('hidden');
@@ -1703,6 +2060,17 @@ document.addEventListener('DOMContentLoaded', () => {
     activeEngine = engineSelect.value;
     customApi = customApiUrl.value.trim();
     autoPreview = autoPreviewCheck.checked;
+
+    if (settingsDriveWebhook) {
+      driveWebhookUrl = settingsDriveWebhook.value.trim();
+      localStorage.setItem('omni_drive_webhook', driveWebhookUrl);
+    }
+    if (settingsDriveFolder) {
+      driveFolderUrl = settingsDriveFolder.value.trim();
+      localStorage.setItem('omni_drive_folder', driveFolderUrl);
+      syncDriveFolderInputs(driveFolderUrl);
+    }
+    updateDriveConfigLabels();
 
     localStorage.setItem('omni_engine', activeEngine);
     localStorage.setItem('omni_custom_api', customApi);

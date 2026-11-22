@@ -1430,6 +1430,266 @@ body {
   display: none !important;
 }
 
+/* Google Drive Direct Push Section */
+.drive-box, .batch-drive-box {
+  background: var(--bg-card);
+  border: 1px solid var(--bg-card-border);
+  border-radius: var(--radius-md);
+  padding: 14px 16px;
+  margin-top: 14px;
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+.drive-box:hover, .batch-drive-box:hover {
+  border-color: rgba(66, 133, 244, 0.4);
+  box-shadow: 0 4px 16px rgba(66, 133, 244, 0.1);
+}
+
+.drive-box-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.drive-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: #4285f4;
+}
+
+.drive-label i {
+  width: 16px;
+  height: 16px;
+}
+
+.drive-config-btn {
+  background: transparent;
+  border: 1px solid var(--bg-card-border);
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  font-size: 0.75rem;
+  padding: 3px 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.drive-config-btn:hover {
+  color: var(--text-main);
+  border-color: #4285f4;
+  background: rgba(66, 133, 244, 0.1);
+}
+
+.drive-config-btn i {
+  width: 13px;
+  height: 13px;
+}
+
+.drive-input-group {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.drive-folder-input {
+  flex: 1;
+  background: var(--bg-input);
+  border: 1px solid var(--bg-input-border);
+  border-radius: var(--radius-sm);
+  color: var(--text-main);
+  font-size: 0.85rem;
+  padding: 8px 12px;
+  outline: none;
+  transition: border-color var(--transition-fast);
+}
+
+.drive-folder-input:focus {
+  border-color: #4285f4;
+  box-shadow: 0 0 0 2px rgba(66, 133, 244, 0.2);
+}
+
+.drive-action-btn {
+  background: linear-gradient(135deg, #4285f4, #34a853);
+  color: white;
+  border: none;
+  border-radius: var(--radius-sm);
+  padding: 8px 16px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all var(--transition-fast);
+}
+
+.drive-action-btn:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(66, 133, 244, 0.35);
+  filter: brightness(1.1);
+}
+
+.drive-action-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.drive-action-btn i {
+  width: 15px;
+  height: 15px;
+}
+
+.drive-status-box {
+  margin-top: 10px;
+  padding: 8px 12px;
+  border-radius: var(--radius-sm);
+  font-size: 0.82rem;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  animation: fadeIn 0.25s ease;
+}
+
+.drive-status-box.loading {
+  background: rgba(66, 133, 244, 0.1);
+  color: #4285f4;
+  border: 1px solid rgba(66, 133, 244, 0.3);
+}
+
+.drive-status-box.success {
+  background: rgba(52, 168, 83, 0.12);
+  color: #34a853;
+  border: 1px solid rgba(52, 168, 83, 0.35);
+}
+
+.drive-status-box.error {
+  background: rgba(234, 67, 53, 0.12);
+  color: #ea4335;
+  border: 1px solid rgba(234, 67, 53, 0.35);
+}
+
+.drive-status-box a {
+  color: inherit;
+  font-weight: 700;
+  text-decoration: underline;
+  margin-left: 4px;
+}
+
+/* Drive Setup Modal */
+.drive-modal-card {
+  max-width: 620px !important;
+  max-height: 85vh;
+  overflow-y: auto;
+}
+
+.drive-modal-body {
+  padding: 16px 24px;
+}
+
+.drive-modal-intro {
+  font-size: 0.9rem;
+  color: var(--text-muted);
+  line-height: 1.5;
+  margin-bottom: 18px;
+}
+
+.setup-step {
+  display: flex;
+  gap: 14px;
+  margin-bottom: 20px;
+}
+
+.step-badge {
+  background: rgba(66, 133, 244, 0.15);
+  color: #4285f4;
+  font-weight: 700;
+  font-size: 0.75rem;
+  padding: 4px 10px;
+  border-radius: 20px;
+  height: fit-content;
+  white-space: nowrap;
+  border: 1px solid rgba(66, 133, 244, 0.3);
+}
+
+.step-content {
+  flex: 1;
+  font-size: 0.88rem;
+  color: var(--text-main);
+  line-height: 1.5;
+}
+
+.step-tip {
+  font-size: 0.82rem;
+  color: var(--text-muted);
+  margin-top: 6px;
+}
+
+.external-link {
+  color: #4285f4;
+  text-decoration: underline;
+}
+
+.code-copy-container {
+  position: relative;
+  margin-top: 10px;
+  border-radius: var(--radius-sm);
+  background: rgba(0, 0, 0, 0.45);
+  border: 1px solid var(--bg-card-border);
+}
+
+.copy-code-btn {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  color: white;
+  border-radius: var(--radius-sm);
+  padding: 5px 10px;
+  font-size: 0.75rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  cursor: pointer;
+  z-index: 2;
+  transition: background var(--transition-fast);
+}
+
+.copy-code-btn:hover {
+  background: rgba(66, 133, 244, 0.6);
+}
+
+.gas-code-preview {
+  margin: 0;
+  padding: 14px;
+  max-height: 180px;
+  overflow-y: auto;
+  font-family: 'Consolas', 'Fira Code', monospace;
+  font-size: 0.75rem;
+  color: #d1d5db;
+  line-height: 1.4;
+}
+
+.webhook-input-row {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.setting-divider {
+  height: 1px;
+  background: var(--bg-card-border);
+  margin: 16px 0;
+}
+
 /* Responsive */
 @media (max-width: 768px) {
   .hero-title {
