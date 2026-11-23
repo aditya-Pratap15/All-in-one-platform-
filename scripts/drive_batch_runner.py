@@ -139,9 +139,12 @@ def download_highest_quality_video(url: str, temp_dir: str, cookies_path: str = 
     
     # Pre-extract info to get title and ID
     ydl_info_opts = {
+        'js_runtimes': {'node': {}},
+        'remote_components': ['ejs:github'],
         'quiet': True,
         'no_warnings': True,
-        'noplaylist': True
+        'noplaylist': True,
+        'extract_flat': False
     }
     if cookies_path and os.path.exists(cookies_path):
         ydl_info_opts['cookiefile'] = cookies_path
@@ -165,8 +168,10 @@ def download_highest_quality_video(url: str, temp_dir: str, cookies_path: str = 
     out_template = os.path.join(temp_dir, f"{safe_title}_{video_id}.%(ext)s")
 
     ydl_opts = {
-        'format': 'bestvideo*+bestaudio/best[acodec!=none]/best',
+        'format': 'bestvideo*+bestaudio/best[acodec!=none]/b/best',
         'merge_output_format': 'mp4',
+        'js_runtimes': {'node': {}},
+        'remote_components': ['ejs:github'],
         'outtmpl': out_template,
         'quiet': False,
         'no_warnings': True,
