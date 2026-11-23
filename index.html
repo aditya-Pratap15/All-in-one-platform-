@@ -500,14 +500,53 @@
                 <button type="button" id="copyGasCodeBtn" class="copy-code-btn">
                   <i data-lucide="copy"></i> <span>Copy Script Code</span>
                 </button>
-                <pre class="gas-code-preview"><code>function doPost(e) {
+                <pre class="gas-code-preview"><code>function doGet(e) { return handleRequest(e ? e.parameter : {}); }
+function doPost(e) {
+  var data = {};
+  try { if (e && e.postData && e.postData.contents) data = JSON.parse(e.postData.contents); }
+  catch (err) { data = e ? (e.parameter || {}) : {}; }
+  return handleRequest(data);
+}
+function handleRequest(data) {
   try {
-    var data = JSON.parse(e.postData.contents);
+    var action = (data.action || 'upload').toLowerCase();
     var folderId = extractFolderId(data.folderUrl || data.folderId);
     var folder = folderId ? DriveApp.getFolderById(folderId) : DriveApp.getRootFolder();
+
+    if (action === 'get_links' || action === 'read_links') {
+      var targetFilename = data.filename || 'links.json';
+      var files = folder.getFilesByName(targetFilename);
+      var targetFile = files.hasNext() ? files.next() : null;
+      if (!targetFile) {
+        var all = folder.getFiles();
+        while (all.hasNext()) {
+          var f = all.next();
+          var nm = f.getName().toLowerCase();
+          if (nm.endsWith('.json') && !nm.includes('history') && !nm.includes('processed')) { targetFile = f; break; }
+        }
+      }
+      if (!targetFile) throw new Error('No ' + targetFilename + ' found in this Drive folder.');
+      var contentText = targetFile.getBlob().getDataAsString();
+      var parsedLinks = [];
+      try { parsedLinks = JSON.parse(contentText); }
+      catch (pe) { parsedLinks = contentText.split(/\r?\n/).map(function(l){return l.trim();}).filter(function(l){return l.length>0;}); }
+      var existing = [];
+      var it = folder.getFiles();
+      while (it.hasNext()) { existing.push(it.next().getName()); }
+      return ContentService.createTextOutput(JSON.stringify({ status: 'success', filename: targetFile.getName(), links: parsedLinks, existingFiles: existing })).setMimeType(ContentService.MimeType.JSON);
+    }
+
+    if (action === 'save_history') {
+      var hName = data.filename || 'processed_history.json';
+      var hJson = JSON.stringify(data.history || [], null, 2);
+      var hFiles = folder.getFilesByName(hName);
+      var hFile = hFiles.hasNext() ? hFiles.next() : folder.createFile(hName, hJson, 'application/json');
+      hFile.setContent(hJson);
+      return ContentService.createTextOutput(JSON.stringify({ status: 'success', message: 'History saved' })).setMimeType(ContentService.MimeType.JSON);
+    }
+
     var filename = data.filename || ('video_' + Date.now() + '.mp4');
     var file;
-
     if (data.fileBase64) {
       var bytes = Utilities.base64Decode(data.fileBase64);
       var blob = Utilities.newBlob(bytes, data.mimeType || 'video/mp4', filename);
@@ -533,10 +572,7 @@
       folderUrl: folder.getUrl()
     })).setMimeType(ContentService.MimeType.JSON);
   } catch (err) {
-    return ContentService.createTextOutput(JSON.stringify({
-      status: 'error',
-      message: err.toString()
-    })).setMimeType(ContentService.MimeType.JSON);
+    return ContentService.createTextOutput(JSON.stringify({ status: 'error', message: err.toString() })).setMimeType(ContentService.MimeType.JSON);
   }
 }
 

@@ -1,0 +1,71 @@
+name: Daily High-Quality Drive Downloader
+
+on:
+  schedule:
+    # 6:30 PM IST (18:30 IST) every day = 13:00 UTC
+    - cron: '0 13 * * *'
+  workflow_dispatch:
+    inputs:
+      folder_url:
+        description: 'Google Drive Folder URL (optional, defaults to DRIVE_FOLDER_URL secret)'
+        required: false
+        type: string
+      json_filename:
+        description: 'JSON file name in the Drive folder'
+        required: false
+        default: 'links.json'
+        type: string
+      force_all:
+        description: 'Force re-download even if already present in Drive'
+        required: false
+        type: boolean
+        default: false
+
+jobs:
+  drive-batch-download:
+    name: Batch Download & Upload to Google Drive
+    runs-on: ubuntu-latest
+    timeout-minutes: 360 # up to 6 hours for large queues
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install System FFmpeg
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+
+      - name: Install Python Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -U yt-dlp requests
+
+      - name: Prepare YouTube Cookies (if provided)
+        run: |
+          if [ -n "$YT_COOKIES" ]; then
+            printf '%s\n' "$YT_COOKIES" > cookies.txt
+            echo "COOKIES_FLAG=--cookies cookies.txt" >> $GITHUB_ENV
+          else
+            echo "COOKIES_FLAG=" >> $GITHUB_ENV
+          fi
+        env:
+          YT_COOKIES: ${{ secrets.YT_COOKIES }}
+
+      - name: Run Batch Downloader
+        run: |
+          python scripts/drive_batch_runner.py \
+            --webhook "${{ secrets.DRIVE_WEBHOOK_URL }}" \
+            --folder "${{ github.event.inputs.folder_url || secrets.DRIVE_FOLDER_URL }}" \
+            --filename "${{ github.event.inputs.json_filename || 'links.json' }}" \
+            $COOKIES_FLAG \
+            ${{ github.event.inputs.force_all && '--force' || '' }}
+        env:
+          DRIVE_WEBHOOK_URL: ${{ secrets.DRIVE_WEBHOOK_URL }}
+          DRIVE_FOLDER_URL: ${{ secrets.DRIVE_FOLDER_URL }}
