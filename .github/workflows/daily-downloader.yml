@@ -20,11 +20,19 @@ on:
         required: false
         type: boolean
         default: false
+      runner:
+        description: 'Runner environment'
+        required: false
+        default: 'ubuntu-latest'
+        type: choice
+        options:
+          - ubuntu-latest
+          - self-hosted
 
 jobs:
   drive-batch-download:
     name: Batch Download & Upload to Google Drive
-    runs-on: ubuntu-latest
+    runs-on: ${{ github.event.inputs.runner || 'ubuntu-latest' }}
     timeout-minutes: 360 # up to 6 hours for large queues
 
     steps:
