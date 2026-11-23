@@ -141,6 +141,11 @@ def download_highest_quality_video(url: str, temp_dir: str, cookies_path: str = 
     ydl_info_opts = {
         'js_runtimes': {'node': {}},
         'remote_components': ['ejs:github'],
+        'extractor_args': {
+            'youtube': {
+                'player_client': ['default', '-tv_samsung', '-web_embedded']
+            }
+        },
         'quiet': True,
         'no_warnings': True,
         'noplaylist': True,
@@ -172,6 +177,11 @@ def download_highest_quality_video(url: str, temp_dir: str, cookies_path: str = 
         'merge_output_format': 'mp4',
         'js_runtimes': {'node': {}},
         'remote_components': ['ejs:github'],
+        'extractor_args': {
+            'youtube': {
+                'player_client': ['default', '-tv_samsung', '-web_embedded']
+            }
+        },
         'outtmpl': out_template,
         'quiet': False,
         'no_warnings': True,
