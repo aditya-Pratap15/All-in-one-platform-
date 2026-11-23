@@ -28,3 +28,7 @@ wheels/
 Thumbs.db
 .vscode/
 .idea/
+
+# Local Config & Secrets
+drive_config.json
+cookies.txt

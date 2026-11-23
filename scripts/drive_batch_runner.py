@@ -29,12 +29,25 @@ except ImportError:
     sys.exit(1)
 
 
+def load_local_config() -> dict:
+    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    cfg_path = os.path.join(base_dir, "drive_config.json")
+    if os.path.exists(cfg_path):
+        try:
+            with open(cfg_path, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            pass
+    return {}
+
+
 def parse_args():
+    cfg = load_local_config()
     parser = argparse.ArgumentParser(description="OmniDownloader Drive Batch Runner")
-    parser.add_argument("--webhook", default=os.getenv("DRIVE_WEBHOOK_URL"), help="Google Apps Script Webhook URL")
-    parser.add_argument("--folder", default=os.getenv("DRIVE_FOLDER_URL") or os.getenv("DRIVE_FOLDER_ID"), help="Target Google Drive Folder URL or ID")
-    parser.add_argument("--filename", default=os.getenv("LINKS_JSON_FILENAME", "links.json"), help="Filename of the JSON containing links in the Drive folder")
-    parser.add_argument("--cookies", default=os.getenv("YT_COOKIES_PATH"), help="Path to cookies.txt file for YouTube")
+    parser.add_argument("--webhook", default=os.getenv("DRIVE_WEBHOOK_URL") or cfg.get("webhook_url") or cfg.get("DRIVE_WEBHOOK_URL"), help="Google Apps Script Webhook URL")
+    parser.add_argument("--folder", default=os.getenv("DRIVE_FOLDER_URL") or os.getenv("DRIVE_FOLDER_ID") or cfg.get("folder_url") or cfg.get("DRIVE_FOLDER_URL"), help="Target Google Drive Folder URL or ID")
+    parser.add_argument("--filename", default=os.getenv("LINKS_JSON_FILENAME") or cfg.get("filename") or "links.json", help="Filename of the JSON containing links in the Drive folder")
+    parser.add_argument("--cookies", default=os.getenv("YT_COOKIES_PATH") or cfg.get("cookies_path"), help="Path to cookies.txt file for YouTube")
     parser.add_argument("--max-videos", type=int, default=int(os.getenv("MAX_VIDEOS", "0")), help="Limit number of videos to download (0 = unlimited)")
     parser.add_argument("--force", action="store_true", default=os.getenv("FORCE_ALL", "false").lower() in ["1", "true", "yes"], help="Force re-download even if file already exists in folder")
     return parser.parse_args()
